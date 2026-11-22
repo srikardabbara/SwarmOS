@@ -1,0 +1,29 @@
+name: "Research workflow test"
+description: "Verify planner, researcher, and writer agents collaborate correctly"
+
+input:
+  messages:
+    - role: user
+      content: "quantum computing advances in 2026"
+  research_topic: ""
+  research_findings: ""
+  final_report: ""
+
+expectations:
+  - type: agent_sequence
+    agents: ["planner", "researcher", "writer"]
+
+  - type: handoff_occurred
+    from: "planner"
+    to: "researcher"
+
+  - type: handoff_occurred
+    from: "researcher"
+    to: "writer"
+
+  - type: context_preserved
+    required_keys: ["research_topic", "research_findings", "final_report"]
+
+metadata:
+  author: "SwarmOS"
+  created: "2024-01-01"
