@@ -10,7 +10,6 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
 lib64/
 parts/
 sdist/
@@ -83,6 +82,6 @@ logs/
 Thumbs.db
 
 # SwarmOS specific
-traces/
-test_results/
+/traces/
+/test_results/
 .swarmos/
