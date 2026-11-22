@@ -195,9 +195,63 @@ class SwarmOSAdapter:
         print(f"{'='*60}\n")
 
     def _send_trace(self) -> None:
-        """Send trace to SwarmOS backend (placeholder)."""
-        # TODO: Implement HTTP request to backend API
-        pass
+        """Send trace to SwarmOS backend."""
+        if not self.api_url:
+            return
+
+        try:
+            import httpx
+
+            # Prepare trace data
+            trace_data = {
+                "id": self.trace.id,
+                "test_id": self.trace.test_id,
+                "workflow_id": self.trace.workflow_id,
+                "started_at": self.trace.started_at.isoformat(),
+                "completed_at": self.trace.completed_at.isoformat() if self.trace.completed_at else None,
+                "status": self.trace.status.value,
+                "input_data": self.trace.input_data,
+                "output_data": self.trace.output_data,
+                "metadata": self.trace.metadata,
+                "events": [
+                    {
+                        "id": e.id,
+                        "trace_id": e.trace_id,
+                        "timestamp": e.timestamp.isoformat(),
+                        "event_type": e.event_type.value,
+                        "agent": e.agent,
+                        "data": e.data,
+                        "parent_event_id": e.parent_event_id,
+                    }
+                    for e in self.trace.events
+                ],
+                "validation_results": [
+                    {
+                        "id": v.id,
+                        "trace_id": v.trace_id,
+                        "validation_type": v.validation_type,
+                        "passed": v.passed,
+                        "message": v.message,
+                        "details": v.details,
+                        "timestamp": v.timestamp.isoformat(),
+                    }
+                    for v in self.trace.validation_results
+                ],
+            }
+
+            # Send to backend
+            response = httpx.post(
+                f"{self.api_url}/traces",
+                json=trace_data,
+                timeout=10.0,
+            )
+            response.raise_for_status()
+            print(f"✓ Trace sent to {self.api_url}")
+
+        except ImportError:
+            print("Warning: httpx not installed. Run: pip install httpx")
+        except Exception as e:
+            print(f"Warning: Failed to send trace to backend: {e}")
 
     def save_trace(self, filepath: str) -> None:
         """Save trace to a JSON file."""
