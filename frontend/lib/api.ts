@@ -62,6 +62,17 @@ export const api = {
     return response.json();
   },
 
+  async applyFix(traceId: string, findingId: string): Promise<{ path: string; summary: string; finding_id: string }> {
+    const response = await fetch(`${API_BASE_URL}/traces/${traceId}/fixes/${findingId}`, {
+      method: 'POST',
+    });
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body.detail || 'Failed to apply fix');
+    }
+    return response.json();
+  },
+
   async deleteTrace(id: string): Promise<void> {
     const response = await fetch(`${API_BASE_URL}/traces/${id}`, {
       method: 'DELETE',

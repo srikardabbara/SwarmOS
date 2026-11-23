@@ -7,6 +7,106 @@ import '@xyflow/react/dist/style.css';
 import { api, Trace, TraceEvent } from '@/lib/api';
 import { ArrowLeft, CheckCircle2, XCircle, AlertCircle } from 'lucide-react';
 
+function CommunicationReview({ trace, onApplied }: { trace: Trace; onApplied: () => void }) {
+  const review = trace.metadata?.communication_review;
+  const findings = Array.isArray(review?.findings) ? review.findings : [];
+  const [pendingId, setPendingId] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [applyError, setApplyError] = useState<string | null>(null);
+
+  async function applyFix(findingId: string) {
+    try {
+      setPendingId(findingId);
+      setApplyError(null);
+      const result = await api.applyFix(trace.id, findingId);
+      setNotice(`${result.summary} Re-run the scenario to confirm.`);
+      onApplied();
+    } catch (err) {
+      setApplyError(err instanceof Error ? err.message : 'Failed to apply fix');
+    } finally {
+      setPendingId(null);
+    }
+  }
+
+  return (
+    <div className="bg-slate-800/30 border border-slate-700/30 rounded-lg p-4 mt-4">
+      <h2 className="text-lg font-semibold text-slate-200 mb-1">Communication review</h2>
+      {review?.note && (
+        <p className="text-xs text-slate-400 mb-3">{review.note}</p>
+      )}
+      {notice && (
+        <p className="text-xs text-green-300 mb-3">{notice}</p>
+      )}
+      {applyError && (
+        <p className="text-xs text-red-300 mb-3">{applyError}</p>
+      )}
+      {!review && (
+        <p className="text-sm text-slate-400">This run was stored before communication review.</p>
+      )}
+      {review && findings.length === 0 && (
+        <p className="text-sm text-slate-400">No broken or wasteful handoffs found.</p>
+      )}
+      <div className="space-y-2 max-h-[520px] overflow-y-auto">
+        {findings.map((finding: {
+          id?: string;
+          severity?: string;
+          category?: string;
+          message?: string;
+          recommendation?: string;
+          steps?: string[];
+          agents?: string[];
+          fix?: Record<string, unknown> | null;
+          applied?: boolean;
+          applied_path?: string;
+        }, index: number) => {
+          const isWaste = finding.severity === 'waste';
+          return (
+            <div
+              key={finding.id || index}
+              className={`p-3 rounded-lg border ${
+                isWaste
+                  ? 'bg-amber-500/5 border-amber-500/20'
+                  : 'bg-red-500/5 border-red-500/20'
+              }`}
+            >
+              <div className="text-sm font-medium text-slate-200">
+                {finding.category}
+                {finding.agents && finding.agents.length > 0 && (
+                  <span className="text-slate-400 font-normal"> · {finding.agents.join(' → ')}</span>
+                )}
+              </div>
+              <div className={`text-xs mt-1 ${isWaste ? 'text-amber-200/80' : 'text-red-300/80'}`}>
+                {finding.message}
+              </div>
+              {finding.steps && finding.steps.length > 0 && (
+                <ol className="mt-2 space-y-1 text-xs text-slate-300 list-decimal pl-4">
+                  {finding.steps.map((step) => (
+                    <li key={step}>{step}</li>
+                  ))}
+                </ol>
+              )}
+              {finding.fix && finding.id && (
+                <button
+                  type="button"
+                  onClick={() => applyFix(finding.id as string)}
+                  disabled={pendingId === finding.id || finding.applied}
+                  className="mt-3 px-3 py-1.5 rounded-md bg-blue-500/15 hover:bg-blue-500/25 border border-blue-400/30 text-xs text-blue-200 disabled:opacity-50"
+                >
+                  {finding.applied
+                    ? `Fixed in ${finding.applied_path}`
+                    : pendingId === finding.id
+                      ? 'Applying…'
+                      : 'Apply fix'}
+                </button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export default function TracePage() {
   const params = useParams();
   const router = useRouter();
@@ -283,6 +383,7 @@ export default function TracePage() {
                 )}
               </div>
             </div>
+            <CommunicationReview trace={trace} onApplied={loadTrace} />
           </div>
         </div>
 

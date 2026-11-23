@@ -62,12 +62,20 @@ export default function HomePage() {
               </h1>
               <p className="text-slate-400 mt-1">Test agent collaboration, not just agents</p>
             </div>
-            <button
-              onClick={loadTraces}
-              className="px-4 py-2 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/20 rounded-lg text-blue-400 transition-colors"
-            >
-              Refresh
-            </button>
+            <div className="flex items-center gap-3">
+              <Link
+                href="/start"
+                className="px-4 py-2 bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/20 rounded-lg text-purple-200 transition-colors"
+              >
+                Connect a workflow
+              </Link>
+              <button
+                onClick={loadTraces}
+                className="px-4 py-2 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/20 rounded-lg text-blue-400 transition-colors"
+              >
+                Refresh
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -103,24 +111,14 @@ export default function HomePage() {
           <div className="text-center py-16">
             <div className="text-6xl mb-4">🤖</div>
             <h2 className="text-2xl font-semibold text-slate-200 mb-2">No traces yet</h2>
-            <p className="text-slate-400 mb-6">Run your first SwarmOS test to see traces here</p>
-            <div className="bg-slate-800/50 border border-slate-700/50 rounded-lg p-6 max-w-2xl mx-auto text-left">
-              <p className="text-slate-300 font-mono text-sm mb-3">Quick Start:</p>
-              <pre className="bg-slate-900/50 border border-slate-700/30 rounded p-4 text-sm text-slate-300 overflow-x-auto">
-{`from swarmos import SwarmOSAdapter
-
-adapter = SwarmOSAdapter(
-    workflow_id="my-workflow",
-    api_url="http://localhost:8000",
-    auto_send=True
-)
-
-result = app.invoke(
-    input_data,
-    config={"callbacks": [adapter.callback_handler]}
-)`}
-              </pre>
-            </div>
+            <p className="text-slate-400 mb-6">Connect a LangGraph workflow, then run a collaboration check.</p>
+            <Link
+              href="/start"
+              className="inline-flex items-center px-4 py-2 bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/20 rounded-lg text-purple-200 transition-colors"
+            >
+              Connect a workflow
+              <ArrowRight className="w-4 h-4 ml-2" />
+            </Link>
           </div>
         )}
 
@@ -156,6 +154,30 @@ result = app.invoke(
                           <>
                             <span>•</span>
                             <span>Test: {trace.test_id}</span>
+                          </>
+                        )}
+                        {typeof trace.metadata?.checks_total === 'number' && (
+                          <>
+                            <span>•</span>
+                            <span className={trace.metadata.passed ? 'text-green-400' : 'text-red-400'}>
+                              {trace.metadata.checks_passed}/{trace.metadata.checks_total} checks
+                            </span>
+                          </>
+                        )}
+                        {typeof trace.metadata?.review_errors === 'number' && trace.metadata.review_errors > 0 && (
+                          <>
+                            <span>•</span>
+                            <span className="text-red-400">
+                              {trace.metadata.review_errors} communication {trace.metadata.review_errors === 1 ? 'error' : 'errors'}
+                            </span>
+                          </>
+                        )}
+                        {typeof trace.metadata?.review_waste === 'number' && trace.metadata.review_waste > 0 && (
+                          <>
+                            <span>•</span>
+                            <span className="text-amber-300">
+                              {trace.metadata.review_waste} waste
+                            </span>
                           </>
                         )}
                       </div>

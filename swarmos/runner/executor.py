@@ -6,6 +6,7 @@ from typing import Any, Callable, List, Optional
 
 from swarmos.core.adapter import SwarmOSAdapter
 from swarmos.core.models import TestScenario, Trace, ValidationResult
+from swarmos.review import review_trace
 from swarmos.validators.registry import get_registry
 
 
@@ -39,9 +40,15 @@ class TestResult:
 class TestExecutor:
     """Executes test scenarios against workflows."""
 
-    def __init__(self):
-        """Initialize test executor."""
+    def __init__(self, api_url: Optional[str] = None):
+        """Initialize test executor.
+
+        Args:
+            api_url: When set, the finished trace is posted to the SwarmOS API
+                so the dashboard can show the pass or fail.
+        """
         self.validator_registry = get_registry()
+        self.api_url = api_url
 
     def run_scenario(
         self,
@@ -64,7 +71,8 @@ class TestExecutor:
         workflow_id = workflow_id or scenario.name
 
         # Create adapter and start trace
-        adapter = SwarmOSAdapter(workflow_id=workflow_id)
+        adapter = SwarmOSAdapter(workflow_id=workflow_id, api_url=self.api_url)
+        adapter.trace.test_id = scenario.name
         adapter.start_trace(scenario.input_data)
 
         error = None
@@ -90,6 +98,27 @@ class TestExecutor:
 
         # Determine overall pass/fail
         passed = error is None and all(v.passed for v in validation_results)
+        adapter.trace.validation_results = validation_results
+        adapter.trace.metadata["passed"] = passed
+        adapter.trace.metadata["checks_passed"] = sum(1 for v in validation_results if v.passed)
+        adapter.trace.metadata["checks_total"] = len(validation_results)
+
+        try:
+            review = review_trace(adapter.trace, scenario.expectations)
+        except Exception as exc:
+            review = {
+                "status": "partial",
+                "note": f"Communication review failed: {exc}",
+                "findings": [],
+                "error_count": 0,
+                "waste_count": 0,
+            }
+        adapter.trace.metadata["communication_review"] = review
+        adapter.trace.metadata["review_errors"] = review["error_count"]
+        adapter.trace.metadata["review_waste"] = review["waste_count"]
+
+        if self.api_url:
+            adapter.send_trace()
 
         end_time = datetime.utcnow()
         duration = (end_time - start_time).total_seconds()
@@ -189,7 +218,20 @@ class TestExecutor:
                     print(f"   Actual:   {validation.details['actual']}")
                 elif "missing_keys" in validation.details:
                     print(f"   Missing: {validation.details['missing_keys']}")
-        
+
+        review = result.trace.metadata.get("communication_review") or {}
+        findings = review.get("findings") or []
+        if review:
+            print(f"\nCommunication review ({review.get('status', 'unknown')}):")
+            print(f"-" * 70)
+            if review.get("note"):
+                print(f"  {review['note']}")
+            if not findings:
+                print("  No communication findings.")
+            for finding in findings:
+                print(f"  [{finding.get('severity')}] {finding.get('category')}: {finding.get('message')}")
+                print(f"    {finding.get('recommendation')}")
+
         print(f"{'='*70}\n")
 
     def print_summary(self, results: List[TestResult]) -> None:
