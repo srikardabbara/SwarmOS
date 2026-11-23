@@ -92,8 +92,8 @@ def main():
     print(f"Description: {scenario.description}")
     print(f"Expectations: {len(scenario.expectations)} validations\n")
 
-    # Create test executor
-    executor = TestExecutor()
+    # Create test executor. Results are posted to the local dashboard API.
+    executor = TestExecutor(api_url="http://localhost:8000")
 
     # Run the test
     print("Running test...")

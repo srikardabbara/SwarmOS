@@ -1,0 +1,25 @@
+name: "Dropped research context"
+description: "Researcher clears findings before the writer runs"
+
+input:
+  messages:
+    - role: user
+      content: "quantum computing advances in 2026"
+  research_topic: ""
+  research_findings: ""
+  final_report: ""
+
+expectations:
+  - type: agent_sequence
+    agents: ["planner", "researcher", "writer"]
+
+  - type: handoff_occurred
+    from: "planner"
+    to: "researcher"
+
+  - type: handoff_occurred
+    from: "researcher"
+    to: "writer"
+
+  - type: context_preserved
+    required_keys: ["research_topic", "research_findings", "final_report"]

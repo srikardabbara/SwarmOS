@@ -9,6 +9,7 @@ from langchain_core.outputs import LLMResult
 
 from swarmos.core.collector import EventCollector
 from swarmos.core.models import Trace, TraceStatus
+from swarmos.core.serialize import to_jsonable
 
 
 class SwarmOSCallbackHandler(BaseCallbackHandler):
@@ -19,20 +20,48 @@ class SwarmOSCallbackHandler(BaseCallbackHandler):
         super().__init__()
         self.collector = collector
         self._current_node: Optional[str] = None
+        self._node_runs: Dict[Any, str] = {}
+
+    def _graph_node_name(
+        self,
+        serialized: Optional[Dict[str, Any]],
+        **kwargs: Any,
+    ) -> Optional[str]:
+        """Return the LangGraph node name, or None for graph-level chains.
+
+        Current LangGraph calls ``on_chain_start(None, payload, name=...)`` and
+        identifies a node when ``name`` matches ``metadata['langgraph_node']``.
+        Older versions passed the name inside ``serialized``.
+        """
+        metadata = kwargs.get("metadata") or {}
+        tags = kwargs.get("tags") or []
+        name = kwargs.get("name")
+        if not name and isinstance(serialized, dict):
+            name = serialized.get("name") or serialized.get("id")
+
+        if not name or not metadata or name != metadata.get("langgraph_node"):
+            return None
+        if "langsmith:hidden" in tags or name in {"__start__", "__end__"}:
+            return None
+        return name
 
     def on_chain_start(
         self,
-        serialized: Dict[str, Any],
+        serialized: Optional[Dict[str, Any]],
         inputs: Dict[str, Any],
         **kwargs: Any,
     ) -> None:
         """Called when a chain (node) starts."""
-        node_name = serialized.get("name", serialized.get("id", "unknown"))
+        node_name = self._graph_node_name(serialized, **kwargs)
+        if node_name is None:
+            return
+
+        run_id = kwargs.get("run_id")
+        if run_id is not None:
+            self._node_runs[run_id] = node_name
         self._current_node = node_name
-        
-        # Only track if this looks like a node (not nested chains)
-        if kwargs.get("parent_run_id") is None:
-            self.collector.on_node_start(node_name, inputs)
+        state = inputs if isinstance(inputs, dict) else {}
+        self.collector.on_node_start(node_name, state)
 
     def on_chain_end(
         self,
@@ -40,8 +69,13 @@ class SwarmOSCallbackHandler(BaseCallbackHandler):
         **kwargs: Any,
     ) -> None:
         """Called when a chain (node) ends."""
-        if self._current_node and kwargs.get("parent_run_id") is None:
-            self.collector.on_node_end(self._current_node, outputs)
+        run_id = kwargs.get("run_id")
+        node_name = self._node_runs.pop(run_id, None) if run_id is not None else None
+        if node_name is None:
+            return
+        self.collector.on_node_end(node_name, outputs)
+        if self._current_node == node_name:
+            self._current_node = None
 
     def on_chain_error(
         self,
@@ -49,16 +83,22 @@ class SwarmOSCallbackHandler(BaseCallbackHandler):
         **kwargs: Any,
     ) -> None:
         """Called when a chain errors."""
+        run_id = kwargs.get("run_id")
+        if run_id is not None:
+            self._node_runs.pop(run_id, None)
         self.collector.on_error(error, self._current_node)
 
     def on_tool_start(
         self,
-        serialized: Dict[str, Any],
+        serialized: Optional[Dict[str, Any]],
         input_str: str,
         **kwargs: Any,
     ) -> None:
         """Called when a tool starts."""
-        tool_name = serialized.get("name", "unknown_tool")
+        if isinstance(serialized, dict):
+            tool_name = serialized.get("name", "unknown_tool")
+        else:
+            tool_name = kwargs.get("name") or "unknown_tool"
         try:
             args = json.loads(input_str) if input_str else {}
         except json.JSONDecodeError:
@@ -146,7 +186,7 @@ class SwarmOSAdapter:
         self.trace.mark_completed(output_data)
         
         if self.auto_send and self.api_url:
-            self._send_trace()
+            self.send_trace()
 
     def get_trace(self) -> Trace:
         """Get the current trace."""
@@ -194,6 +234,10 @@ class SwarmOSAdapter:
         
         print(f"{'='*60}\n")
 
+    def send_trace(self) -> None:
+        """Send the current trace, including validation results, to the backend."""
+        self._send_trace()
+
     def _send_trace(self) -> None:
         """Send trace to SwarmOS backend."""
         if not self.api_url:
@@ -202,7 +246,7 @@ class SwarmOSAdapter:
         try:
             import httpx
 
-            # Prepare trace data
+            # Prepare trace data. Workflow state can contain LangChain messages.
             trace_data = {
                 "id": self.trace.id,
                 "test_id": self.trace.test_id,
@@ -210,9 +254,9 @@ class SwarmOSAdapter:
                 "started_at": self.trace.started_at.isoformat(),
                 "completed_at": self.trace.completed_at.isoformat() if self.trace.completed_at else None,
                 "status": self.trace.status.value,
-                "input_data": self.trace.input_data,
-                "output_data": self.trace.output_data,
-                "metadata": self.trace.metadata,
+                "input_data": to_jsonable(self.trace.input_data),
+                "output_data": to_jsonable(self.trace.output_data),
+                "metadata": to_jsonable(self.trace.metadata),
                 "events": [
                     {
                         "id": e.id,
@@ -220,7 +264,7 @@ class SwarmOSAdapter:
                         "timestamp": e.timestamp.isoformat(),
                         "event_type": e.event_type.value,
                         "agent": e.agent,
-                        "data": e.data,
+                        "data": to_jsonable(e.data),
                         "parent_event_id": e.parent_event_id,
                     }
                     for e in self.trace.events
@@ -232,7 +276,7 @@ class SwarmOSAdapter:
                         "validation_type": v.validation_type,
                         "passed": v.passed,
                         "message": v.message,
-                        "details": v.details,
+                        "details": to_jsonable(v.details),
                         "timestamp": v.timestamp.isoformat(),
                     }
                     for v in self.trace.validation_results

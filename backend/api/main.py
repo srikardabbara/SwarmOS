@@ -308,6 +308,53 @@ async def get_trace(trace_id: str, db: Session = Depends(get_db)):
     )
 
 
+class FixResponse(BaseModel):
+    """Result of applying a communication fix."""
+
+    path: str
+    summary: str
+    finding_id: str
+
+
+@app.post("/traces/{trace_id}/fixes/{finding_id}", response_model=FixResponse)
+async def apply_trace_fix(trace_id: str, finding_id: str, db: Session = Depends(get_db)):
+    """Edit the workflow so this communication finding is fixed."""
+    trace = db.query(TraceDB).filter(TraceDB.id == trace_id).first()
+    if not trace:
+        raise HTTPException(status_code=404, detail=f"Trace {trace_id} not found")
+
+    metadata = json.loads(trace.metadata or "{}")
+    review = metadata.get("communication_review") or {}
+    findings = review.get("findings") or []
+    finding = next((item for item in findings if item.get("id") == finding_id), None)
+    if finding is None:
+        raise HTTPException(status_code=404, detail=f"Finding {finding_id} not found")
+    if finding.get("applied"):
+        return FixResponse(
+            path=finding.get("applied_path") or "",
+            summary="This fix was already applied.",
+            finding_id=finding_id,
+        )
+    if not finding.get("fix"):
+        raise HTTPException(status_code=400, detail="This finding has steps, but SwarmOS cannot edit it automatically")
+
+    from swarmos.review.fixes import apply_fix
+
+    try:
+        result = apply_fix(finding["fix"])
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    finding["applied"] = True
+    finding["applied_path"] = result["path"]
+    review["findings"] = findings
+    metadata["communication_review"] = review
+    trace.metadata = json.dumps(metadata)
+    db.commit()
+
+    return FixResponse(path=result["path"], summary=result["summary"], finding_id=finding_id)
+
+
 @app.delete("/traces/{trace_id}", status_code=204)
 async def delete_trace(trace_id: str, db: Session = Depends(get_db)):
     """Delete a trace."""
