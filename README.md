@@ -1,164 +1,48 @@
 # SwarmOS
 
-> Fail the pull request when a LangGraph handoff breaks
+## What SwarmOS is
 
-## What is this?
+SwarmOS analyzes agent-to-agent communication inside a LangGraph run. It reads the trace and shows the information each agent handed to the next one: the task that was passed, the text the next agent never used, and a fact that changed along the way.
 
-SwarmOS checks whether your agents **handed the work off correctly**. A trace of the run is the evidence. The product is the check that fails the release when the next agent never received the state it needs.
+Use that to write more efficient instructions, drop messages that never affect the next step, and find the handoff where the output went wrong.
 
-A recording of the graph is not the product. The pull request fails when the required sequence, the handoff, or a state key does not survive.
+Run the site on your laptop, then follow the Instructions page to connect the agent.
 
-## The Problem
+## Run it on your laptop
 
-Traditional testing doesn't catch multi-agent failures:
+You need Python 3.10 or newer, Node.js, and npm. Use two terminals, and leave both servers running.
 
-```
-✓ Agent A works
-✓ Agent B works  
-✓ Agent C works
-✗ But A→B handoff loses context    👈 SwarmOS finds this
-```
-
-You test agents. SwarmOS tests **COLLABORATION**.
-
-## Quick Start
-
-### Installation
+### 1. Download the project
 
 ```bash
-pip install swarmos
+git clone https://github.com/srikardabbara/SwarmOS.git
+cd SwarmOS
 ```
 
-### Add to Your LangGraph Workflow
-
-Add 3 lines to your existing workflow:
-
-```python
-from swarmos import SwarmOSAdapter
-from langgraph.graph import StateGraph
-
-# Your existing workflow
-graph = StateGraph(State)
-# ... add nodes and edges ...
-
-# Add SwarmOS instrumentation
-adapter = SwarmOSAdapter()
-app = graph.compile()
-
-# Run with tracing
-result = app.invoke(
-    input_data,
-    config={"callbacks": [adapter.callback_handler]}
-)
-```
-
-### Define a Test
-
-Create `tests/handoff_test.yaml`:
-
-```yaml
-name: "Support to billing handoff"
-description: "Verify support agent hands off to billing agent correctly"
-
-input:
-  messages:
-    - role: user
-      content: "I want to cancel my subscription"
-
-expectations:
-  - type: agent_sequence
-    agents: ["support_agent", "billing_agent"]
-  
-  - type: handoff_occurred
-    from: "support_agent"
-    to: "billing_agent"
-  
-  - type: context_preserved
-    required_keys: ["user_id", "subscription_id"]
-```
-
-### Run Tests
+### 2. Install SwarmOS from this folder
 
 ```bash
-swarmos test
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e ".[backend]"
 ```
 
-### View Results
+On Windows, activate the environment with `.venv\Scripts\activate` instead of `source .venv/bin/activate`.
 
-```bash
-swarmos dashboard
-```
+### 3. Start the backend
 
-Then open your browser to see the interactive visualization.
-
-## Why SwarmOS?
-
-### What SwarmOS Catches
-
-**Broken Handoffs**
-- Agent A declares handoff but Agent B never executes
-
-**Context Loss**
-- Critical state keys disappear between agent transitions
-
-**Message Schema Violations**
-- Downstream agents receive malformed data
-
-**Tool Call Failures**
-- Agents skip required tool calls in multi-step workflows
-
-**Coordination Loops**
-- Agents get stuck passing control back and forth
-
-## Features
-
-- **🔍 Workflow Instrumentation**: Capture every agent invocation, message, and handoff
-- **✅ Test Scenarios**: Define expectations in simple YAML
-- **📊 Interactive Visualization**: See your agent workflow in real-time
-- **🎯 Smart Validation**: Detect handoff failures, context loss, and coordination issues
-- **⚡ Fast Setup**: 3 lines of code, 5-minute integration
-- **🔗 LangGraph Native**: Built specifically for LangGraph workflows
-
-## Documentation
-
-- [Getting Started Guide](docs/getting-started.md)
-- [Test Scenarios](docs/test-scenarios.md)
-- [Validation Types](docs/validators.md)
-- [CLI Reference](docs/cli.md)
-- [API Documentation](docs/api.md)
-
-## Examples
-
-Check out [`examples/`](examples/) for complete working examples:
-
-- **Research Workflow**: Planner → Researcher → Writer
-- **Customer Support**: Support → Billing → Resolution
-- **Code Review**: Analyzer → Reviewer → Approver
-
-## Development
-
-### Setup
-
-```bash
-git clone https://github.com/swarmos/swarmos.git
-cd swarmos
-pip install -e ".[dev,backend]"
-```
-
-### Run Tests
-
-```bash
-pytest
-```
-
-### Start Backend (for dashboard)
+In that same terminal:
 
 ```bash
 cd backend
-uvicorn api.main:app --reload
+python -m uvicorn api.main:app --reload --port 8000
 ```
 
-### Start Frontend (for dashboard)
+The API is at http://localhost:8000. The first run creates a local database in the `backend` folder.
+
+### 4. Start the website
+
+Open a second terminal, go back to the `SwarmOS` folder, and run:
 
 ```bash
 cd frontend
@@ -166,57 +50,21 @@ npm install
 npm run dev
 ```
 
-## Architecture
+The site is at http://localhost:3000.
 
-```
-┌─────────────────────────────────────────────────┐
-│  Developer's LangGraph Workflow                 │
-│  ┌──────┐    ┌──────┐    ┌──────┐             │
-│  │Agent │───→│Agent │───→│Agent │             │
-│  │  A   │    │  B   │    │  C   │             │
-│  └──┬───┘    └──┬───┘    └──┬───┘             │
-│     │            │            │                 │
-│     └────────────┴────────────┘                 │
-│                  │                              │
-│         SwarmOSAdapter                          │
-│         (captures events)                       │
-└─────────────────┬───────────────────────────────┘
-                  │
-                  ▼
-        ┌──────────────────┐
-        │ SwarmOS Backend  │
-        │   (FastAPI)      │
-        │                  │
-        │ - Event Storage  │
-        │ - Test Runner    │
-        │ - Validators     │
-        └────────┬─────────┘
-                 │
-                 ▼
-        ┌──────────────────┐
-        │ SwarmOS Dashboard│
-        │  (React + Vercel)│
-        │                  │
-        │ - Workflow Graph │
-        │ - Test Results   │
-        │ - Trace Timeline │
-        └──────────────────┘
+### 5. Connect the agent
+
+Open [http://localhost:3000/start](http://localhost:3000/start) and follow **Connect a project**. That page creates the SwarmOS project key and walks through the LangSmith key, the agent name or ID, and the command that reads the newest trace.
+
+When that page shows `pip install swarmos`, skip that line. The virtual environment from step 2 already provides the `swarmos` command. In a terminal where that environment is active, paste the rest of the exports from the page, then run:
+
+```bash
+source .venv/bin/activate
+swarmos langsmith
 ```
 
-## Contributing
-
-Contributions welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) first.
+Run `source` from the `SwarmOS` folder. On Windows, use `.venv\Scripts\activate`. The command prints a link. Open it, or go back to Runs and open the new row.
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) for details.
-
-## Support
-
-- 📧 Email: support@swarmos.dev
-- 💬 Discord: [Join our community](https://discord.gg/swarmos)
-- 🐛 Issues: [GitHub Issues](https://github.com/swarmos/swarmos/issues)
-
----
-
-**Built for LangGraph developers who want their multi-agent systems to actually work in production.**
+MIT. See [LICENSE](LICENSE).
