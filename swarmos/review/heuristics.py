@@ -1,5 +1,7 @@
 """Deterministic checks for broken or wasteful agent communication."""
 
+import re
+
 from swarmos.core.models import EventType, Trace
 from swarmos.review.fixes import (
     fix_for_context_loss,
@@ -28,6 +30,8 @@ def heuristic_findings(
     findings.extend(_redundant_agents(trace, required))
     findings.extend(_loops(trace))
     findings.extend(_empty_handoffs(trace))
+    findings.extend(_unused_context(trace))
+    findings.extend(_misread(trace))
     return findings
 
 
@@ -200,3 +204,176 @@ def _empty_handoffs(trace: Trace) -> list[CommunicationFinding]:
             )
         )
     return findings
+
+
+_STOP = {
+    "about", "after", "again", "their", "there", "these", "those", "which", "while",
+    "would", "could", "should", "other", "into", "from", "with", "that", "this",
+    "have", "been", "were", "they", "them", "than", "then", "also", "only", "over",
+    "under", "such", "some", "more", "most", "each", "when", "where", "what",
+}
+_DIRECTION = {
+    "grew": "up",
+    "grown": "up",
+    "growth": "up",
+    "increased": "up",
+    "increase": "up",
+    "rose": "up",
+    "rising": "up",
+    "higher": "up",
+    "fell": "down",
+    "fallen": "down",
+    "declined": "down",
+    "decline": "down",
+    "dropped": "down",
+    "lower": "down",
+    "down": "down",
+    "cut": "down",
+}
+_PERCENT = re.compile(r"(\d+(?:\.\d+)?)\s*%")
+
+
+def _unused_context(trace: Trace) -> list[CommunicationFinding]:
+    """A long field was handed off and the next agent did not use it."""
+    findings = []
+    events = list(trace.events)
+    for index, event in enumerate(events):
+        if event.event_type != EventType.HANDOFF:
+            continue
+        fields = event.data.get("passed_fields") or {}
+        if not isinstance(fields, dict):
+            continue
+        source = event.data.get("from_agent") or "an agent"
+        target = event.data.get("to_agent") or "the next agent"
+        sender = next(
+            (
+                item
+                for item in reversed(events[:index])
+                if item.event_type == EventType.NODE_EXIT and item.agent == event.data.get("from_agent")
+            ),
+            None,
+        )
+        contributed = set((sender.data.get("wrote") or {}).keys()) if sender else set()
+        receiver = next(
+            (
+                item
+                for item in events[index + 1 :]
+                if item.event_type == EventType.NODE_EXIT and item.agent == event.data.get("to_agent")
+            ),
+            None,
+        )
+        if receiver is None:
+            continue
+        wrote = receiver.data.get("wrote") or {}
+        receiver_text = " ".join(str(value) for value in wrote.values()) if isinstance(wrote, dict) else ""
+        receiver_text = f"{receiver_text} {receiver.data.get('excerpt') or ''}"
+        receiver_words = set(_content_words(receiver_text))
+        unused: list[tuple[str, int]] = []
+        for key, value in fields.items():
+            if key == "messages" or not isinstance(value, str):
+                continue
+            if contributed and key not in contributed:
+                continue
+            words = _content_words(value)[:80]
+            if len(words) < 12:
+                continue
+            used = sum(1 for word in words if word in receiver_words)
+            if used / len(words) < 0.25:
+                unused.append((key, len(value)))
+        if not unused:
+            continue
+        names = ", ".join(key for key, _size in unused)
+        tokens = max(1, sum(size for _key, size in unused) // 4)
+        findings.append(
+            CommunicationFinding(
+                severity="waste",
+                category="unused_context",
+                agents=[source, target],
+                message=(
+                    f"{source} passed {names} to {target}, about {tokens} tokens, "
+                    f"and {target} did not use that material."
+                ),
+                recommendation=(
+                    f"Stop sending {names} on this handoff, or have {target} use the part that should "
+                    "change the result. Unused research still costs the tokens to produce and to pass."
+                ),
+                steps=[
+                    f"Read what {source} put in {names}. Compare it with what {target} wrote.",
+                    f"If {target} does not need it, remove it from the state {target} receives.",
+                    f"If it should change the result, have {target} cite it. Re-run and confirm this waste finding is gone.",
+                ],
+                event_ids=[event.id, receiver.id],
+                source="heuristic",
+            )
+        )
+    return findings
+
+
+def _misread(trace: Trace) -> list[CommunicationFinding]:
+    """A later agent states a different figure than the agent it just heard."""
+    findings = []
+    exits = [
+        event
+        for event in trace.events
+        if event.event_type == EventType.NODE_EXIT and isinstance(event.data.get("wrote"), dict)
+    ]
+    for earlier, later in zip(exits, exits[1:]):
+        earlier_text = " ".join(str(value) for value in earlier.data["wrote"].values())
+        later_text = " ".join(str(value) for value in later.data["wrote"].values())
+        earlier_claims = {claim[0]: claim for claim in _claims(earlier_text)}
+        for label, number, direction, shown in _claims(later_text):
+            previous = earlier_claims.get(label)
+            if previous is None:
+                continue
+            number_changed = abs(previous[1] - number) > 0.5
+            direction_changed = bool(previous[2] and direction and previous[2] != direction)
+            if not number_changed and not direction_changed:
+                continue
+            source = earlier.agent or "the previous agent"
+            target = later.agent or "the next agent"
+            findings.append(
+                CommunicationFinding(
+                    severity="error",
+                    category="misread",
+                    agents=[source, target],
+                    message=(
+                        f"{target} wrote {label} {shown} after {source} wrote {label} {previous[3]}."
+                    ),
+                    recommendation=(
+                        f"Have {target} use the figure {source} wrote, including the direction, "
+                        "unless a later calculation is supposed to replace it and is shown in the handoff."
+                    ),
+                    steps=[
+                        f"Open what {source} wrote for {label}: {previous[3]}.",
+                        f"Open what {target} wrote for the same thing: {shown}.",
+                        "Make the later agent carry the earlier figure forward, or show the calculation that replaced it. Re-run the scenario.",
+                    ],
+                    event_ids=[earlier.id, later.id],
+                    source="heuristic",
+                )
+            )
+            break
+    return findings
+
+
+def _content_words(text: str) -> list[str]:
+    return [word for word in re.findall(r"[a-z]{5,}", text.lower()) if word not in _STOP]
+
+
+def _claims(text: str) -> list[tuple[str, float, str | None, str]]:
+    """Labeled percentages, with the direction word nearest the number."""
+    lowered = text.lower()
+    claims = []
+    for match in _PERCENT.finditer(lowered):
+        window = lowered[max(0, match.start() - 80) : match.start()]
+        words = re.findall(r"[a-z]{3,}", window)
+        label = None
+        direction = None
+        for word in reversed(words):
+            if direction is None and word in _DIRECTION:
+                direction = _DIRECTION[word]
+            if label is None and word not in _STOP and word not in _DIRECTION and len(word) >= 4:
+                label = word
+        if label:
+            claims.append((label, float(match.group(1)), direction, match.group(0)))
+    return claims

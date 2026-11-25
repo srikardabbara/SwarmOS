@@ -10,6 +10,7 @@ This shows how to:
 Run with: python examples/test_with_yaml.py
 """
 
+import os
 from typing import Annotated, Any, Dict, TypedDict
 
 from langchain_core.messages import HumanMessage
@@ -93,7 +94,10 @@ def main():
     print(f"Expectations: {len(scenario.expectations)} validations\n")
 
     # Create test executor. Results are posted to the local dashboard API.
-    executor = TestExecutor(api_url="http://localhost:8000")
+    executor = TestExecutor(
+        api_url=os.environ.get("SWARMOS_API_URL", "http://localhost:8000"),
+        api_key=os.environ.get("SWARMOS_API_KEY"),
+    )
 
     # Run the test
     print("Running test...")

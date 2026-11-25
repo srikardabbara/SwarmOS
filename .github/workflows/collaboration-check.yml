@@ -1,0 +1,24 @@
+# Example for an app repo. This copy only runs when someone starts it by hand
+# so it does not fail SwarmOS itself. Customers should copy
+# examples/ci/collaboration-check.yml into their own .github/workflows and
+# point --workflow at the module that defines run_workflow.
+name: Collaboration check
+
+on:
+  workflow_dispatch:
+
+jobs:
+  swarmos:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install SwarmOS
+        run: pip install swarmos
+      - name: Check the handoff
+        env:
+          SWARMOS_API_URL: ${{ secrets.SWARMOS_API_URL }}
+          SWARMOS_API_KEY: ${{ secrets.SWARMOS_API_KEY }}
+        run: swarmos test ./tests --workflow myapp.workflow

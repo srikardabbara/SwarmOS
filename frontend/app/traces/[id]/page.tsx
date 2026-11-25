@@ -4,27 +4,84 @@ import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { ReactFlow, Node, Edge, Background, Controls, MarkerType } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { api, Trace, TraceEvent } from '@/lib/api';
+import { api, getProjectKey, ProjectKeyError, Trace, TraceEvent } from '@/lib/api';
+import { ProjectUnlock } from '@/components/ProjectUnlock';
+import { SiteHeader } from '@/components/SiteHeader';
 import { ArrowLeft, CheckCircle2, XCircle, AlertCircle } from 'lucide-react';
 
-function CommunicationReview({ trace, onApplied }: { trace: Trace; onApplied: () => void }) {
+function HandoffTranscript({ trace }: { trace: Trace }) {
+  const turns = (trace.events || []).flatMap((event) => {
+    if (event.event_type === 'node_exit' && event.data.wrote && typeof event.data.wrote === 'object') {
+      const fields = Object.entries(event.data.wrote as Record<string, string>);
+      if (fields.length === 0) return [];
+      return [{ id: event.id, kind: 'wrote' as const, agent: event.agent, fields }];
+    }
+    if (event.event_type === 'handoff') {
+      const fields = event.data.passed_fields && typeof event.data.passed_fields === 'object'
+        ? Object.entries(event.data.passed_fields as Record<string, string>)
+        : [];
+      return [{
+        id: event.id,
+        kind: 'handoff' as const,
+        from: event.data.from_agent as string | undefined,
+        to: event.data.to_agent as string | undefined,
+        fields,
+        excerpt: typeof event.data.excerpt === 'string' ? event.data.excerpt : '',
+      }];
+    }
+    return [];
+  });
+
+  return (
+    <div className="bg-slate-800/30 border border-slate-700/30 rounded-lg p-4 mt-4">
+      <h2 className="text-lg font-semibold text-slate-200 mb-1">What each agent passed on</h2>
+      <p className="text-xs text-slate-400 mb-3">
+        The text on the handoff, then what the next agent actually wrote. A green check can still hide research that was ignored or a figure that changed.
+      </p>
+      {turns.length === 0 && (
+        <p className="text-sm text-slate-400">This run has no handoff text.</p>
+      )}
+      <div className="space-y-3 max-h-[520px] overflow-y-auto">
+        {turns.map((turn) => (
+          <div key={turn.id} className="rounded-lg border border-slate-700/40 bg-slate-950/40 p-3">
+            <div className="text-sm font-medium text-slate-200">
+              {turn.kind === 'wrote'
+                ? `${turn.agent || 'Agent'} wrote`
+                : `${turn.from || 'An agent'} → ${turn.to || 'the next agent'}`}
+            </div>
+            {turn.fields.length > 0 ? (
+              <div className="mt-2 space-y-2">
+                {turn.fields.map(([key, value]) => (
+                  <div key={key}>
+                    <div className="text-xs font-medium text-purple-300">{key}</div>
+                    <p className="text-xs leading-relaxed text-slate-300 whitespace-pre-wrap">{value}</p>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="mt-2 text-xs text-slate-400">{turn.kind === 'handoff' && turn.excerpt ? turn.excerpt : 'Nothing was attached.'}</p>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function CommunicationReview({ trace }: { trace: Trace }) {
   const review = trace.metadata?.communication_review;
   const findings = Array.isArray(review?.findings) ? review.findings : [];
-  const [pendingId, setPendingId] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
-  const [applyError, setApplyError] = useState<string | null>(null);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [copyError, setCopyError] = useState<string | null>(null);
 
-  async function applyFix(findingId: string) {
+  async function copyApply(findingId: string) {
+    const command = `swarmos apply ${trace.id} ${findingId}`;
     try {
-      setPendingId(findingId);
-      setApplyError(null);
-      const result = await api.applyFix(trace.id, findingId);
-      setNotice(`${result.summary} Re-run the scenario to confirm.`);
-      onApplied();
-    } catch (err) {
-      setApplyError(err instanceof Error ? err.message : 'Failed to apply fix');
-    } finally {
-      setPendingId(null);
+      await navigator.clipboard.writeText(command);
+      setCopiedId(findingId);
+      setCopyError(null);
+    } catch {
+      setCopyError('Select the command below and copy it.');
     }
   }
 
@@ -34,11 +91,8 @@ function CommunicationReview({ trace, onApplied }: { trace: Trace; onApplied: ()
       {review?.note && (
         <p className="text-xs text-slate-400 mb-3">{review.note}</p>
       )}
-      {notice && (
-        <p className="text-xs text-green-300 mb-3">{notice}</p>
-      )}
-      {applyError && (
-        <p className="text-xs text-red-300 mb-3">{applyError}</p>
+      {copyError && (
+        <p className="text-xs text-red-300 mb-3">{copyError}</p>
       )}
       {!review && (
         <p className="text-sm text-slate-400">This run was stored before communication review.</p>
@@ -86,18 +140,21 @@ function CommunicationReview({ trace, onApplied }: { trace: Trace; onApplied: ()
                 </ol>
               )}
               {finding.fix && finding.id && (
-                <button
-                  type="button"
-                  onClick={() => applyFix(finding.id as string)}
-                  disabled={pendingId === finding.id || finding.applied}
-                  className="mt-3 px-3 py-1.5 rounded-md bg-blue-500/15 hover:bg-blue-500/25 border border-blue-400/30 text-xs text-blue-200 disabled:opacity-50"
-                >
-                  {finding.applied
-                    ? `Fixed in ${finding.applied_path}`
-                    : pendingId === finding.id
-                      ? 'Applying…'
-                      : 'Apply fix'}
-                </button>
+                <div className="mt-3">
+                  <p className="text-xs text-slate-400">
+                    Run this in the repo that contains the graph. The dashboard does not edit your files.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => copyApply(finding.id as string)}
+                    className="mt-2 px-3 py-1.5 rounded-md bg-blue-500/15 hover:bg-blue-500/25 border border-blue-400/30 text-xs text-blue-200"
+                  >
+                    {copiedId === finding.id ? 'Copied' : 'Copy apply command'}
+                  </button>
+                  <pre className="mt-2 overflow-x-auto rounded bg-slate-950/60 px-2 py-1.5 text-xs text-slate-300">
+                    swarmos apply {trace.id} {finding.id}
+                  </pre>
+                </div>
               )}
             </div>
           );
@@ -115,18 +172,29 @@ export default function TracePage() {
   const [trace, setTrace] = useState<Trace | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [locked, setLocked] = useState(false);
 
   useEffect(() => {
     loadTrace();
   }, [traceId]);
 
   async function loadTrace() {
+    if (!getProjectKey()) {
+      setLocked(true);
+      setLoading(false);
+      return;
+    }
     try {
       setLoading(true);
+      setLocked(false);
       const data = await api.getTrace(traceId);
       setTrace(data);
       setError(null);
     } catch (err) {
+      if (err instanceof ProjectKeyError) {
+        setLocked(true);
+        return;
+      }
       setError('Failed to load trace');
       console.error(err);
     } finally {
@@ -221,12 +289,30 @@ export default function TracePage() {
     return { nodes, edges };
   }
 
+  if (locked) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
+        <SiteHeader />
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
+          <ProjectUnlock
+            onUnlocked={() => {
+              loadTrace();
+            }}
+          />
+        </div>
+      </div>
+    );
+  }
+
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center">
-        <div className="text-center">
+      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
+        <SiteHeader />
+        <div className="flex items-center justify-center py-24">
+          <div className="text-center">
           <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
           <p className="text-slate-400 mt-4">Loading trace...</p>
+          </div>
         </div>
       </div>
     );
@@ -234,7 +320,9 @@ export default function TracePage() {
 
   if (error || !trace) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center">
+      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
+        <SiteHeader />
+        <div className="flex items-center justify-center py-24">
         <div className="text-center">
           <XCircle className="w-12 h-12 text-red-500 mx-auto mb-4" />
           <h2 className="text-xl font-semibold text-slate-200 mb-2">Error loading trace</h2>
@@ -246,6 +334,7 @@ export default function TracePage() {
             Back to Dashboard
           </button>
         </div>
+        </div>
       </div>
     );
   }
@@ -256,7 +345,7 @@ export default function TracePage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
-      {/* Header */}
+      <SiteHeader />
       <div className="border-b border-slate-700/50 bg-slate-900/50 backdrop-blur">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
           <button
@@ -383,7 +472,8 @@ export default function TracePage() {
                 )}
               </div>
             </div>
-            <CommunicationReview trace={trace} onApplied={loadTrace} />
+            <HandoffTranscript trace={trace} />
+            <CommunicationReview trace={trace} />
           </div>
         </div>
 

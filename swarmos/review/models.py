@@ -17,6 +17,8 @@ REVIEW_CATEGORIES = {
     "serial_when_parallel",
     "weak_synthesis",
     "effort_mismatch",
+    "unused_context",
+    "misread",
 }
 
 

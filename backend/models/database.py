@@ -1,23 +1,49 @@
 """SQLAlchemy database models."""
 
-import json
+import os
 from datetime import datetime
 from typing import Generator
 
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text, create_engine
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import Session, relationship, sessionmaker
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text, create_engine, inspect, text
+from sqlalchemy.orm import Session, declarative_base, relationship, sessionmaker
 
 Base = declarative_base()
 
-# Database URL (SQLite for MVP)
-DATABASE_URL = "sqlite:///./swarmos.db"
 
-# Create engine
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+def normalize_database_url(url: str) -> str:
+    """Use the psycopg driver when the host gives a plain Postgres URL."""
+    if url.startswith("postgres://"):
+        url = "postgresql://" + url[len("postgres://") :]
+    if url.startswith("postgresql://"):
+        url = "postgresql+psycopg://" + url[len("postgresql://") :]
+    return url
+
+
+# SQLite remains the local default. Set DATABASE_URL to host on Postgres.
+DATABASE_URL = normalize_database_url(os.environ.get("DATABASE_URL", "sqlite:///./swarmos.db"))
+
+_sqlite = DATABASE_URL.startswith("sqlite")
+engine = create_engine(
+    DATABASE_URL,
+    connect_args={"check_same_thread": False} if _sqlite else {},
+    pool_pre_ping=not _sqlite,
+)
 
 # Create session factory
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+
+class ProjectDB(Base):
+    """A customer project. The ingest key is stored only as a hash."""
+
+    __tablename__ = "projects"
+
+    id = Column(String, primary_key=True)
+    name = Column(String, nullable=False)
+    key_hash = Column(String, nullable=False, unique=True, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+    traces = relationship("TraceDB", back_populates="project")
 
 
 class TraceDB(Base):
@@ -26,6 +52,7 @@ class TraceDB(Base):
     __tablename__ = "traces"
 
     id = Column(String, primary_key=True, index=True)
+    project_id = Column(String, ForeignKey("projects.id"), nullable=True, index=True)
     test_id = Column(String, nullable=True, index=True)
     workflow_id = Column(String, nullable=False, index=True)
     started_at = Column(DateTime, default=datetime.utcnow, nullable=False)
@@ -36,6 +63,7 @@ class TraceDB(Base):
     metadata = Column(Text, nullable=False, default="{}")  # JSON string
 
     # Relationships
+    project = relationship("ProjectDB", back_populates="traces")
     events = relationship("EventDB", back_populates="trace", cascade="all, delete-orphan")
     validation_results = relationship(
         "ValidationResultDB", back_populates="trace", cascade="all, delete-orphan"
@@ -79,7 +107,18 @@ class ValidationResultDB(Base):
 def init_db() -> None:
     """Initialize the database (create tables)."""
     Base.metadata.create_all(bind=engine)
+    _ensure_project_column()
     print("Database initialized successfully")
+
+
+def _ensure_project_column() -> None:
+    """Add project scoping to a database created before projects existed."""
+    columns = {column["name"] for column in inspect(engine).get_columns("traces")}
+    if "project_id" in columns:
+        return
+    with engine.begin() as connection:
+        connection.execute(text("ALTER TABLE traces ADD COLUMN project_id VARCHAR"))
+        connection.execute(text("CREATE INDEX IF NOT EXISTS ix_traces_project_id ON traces (project_id)"))
 
 
 def get_db() -> Generator[Session, None, None]:

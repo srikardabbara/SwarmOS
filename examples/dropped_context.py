@@ -9,6 +9,7 @@ explains the next change instead of deleting a node the test still expects.
 Run with: python examples/dropped_context.py
 """
 
+import os
 from typing import Annotated, Any, Dict, TypedDict
 
 from langgraph.graph import END, StateGraph
@@ -74,7 +75,10 @@ def main():
     print("=" * 70 + "\n")
 
     scenario = load_scenario("examples/test_scenarios/dropped_context.yaml")
-    executor = TestExecutor(api_url="http://localhost:8000")
+    executor = TestExecutor(
+        api_url=os.environ.get("SWARMOS_API_URL", "http://localhost:8000"),
+        api_key=os.environ.get("SWARMOS_API_KEY"),
+    )
     result = executor.run_scenario(
         scenario=scenario,
         workflow=run_workflow,

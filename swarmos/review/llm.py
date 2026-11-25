@@ -131,6 +131,8 @@ Allowed categories:
 - serial_when_parallel: independent work ran one agent after another
 - weak_synthesis: several agents produced overlapping results and nobody merged them
 - effort_mismatch: a heavy step did a lookup, or a thin step was asked to synthesize
+- unused_context: a field with real content was handed to the next agent and that agent's output does not use it. Waste. Name the field and the agents.
+- misread: a number, direction, or conclusion in one agent's output contradicts what the previous agent wrote, with no new evidence in between. Error. Quote both versions.
 
 severity is "error" when the collaboration is wrong, and "waste" when it worked but cost a needless step. Cite event ids from the digest. recommendation is one concrete change. Return an empty findings list when the communication looks sound. Do not repeat a problem that is already obvious from a single cleared or dropped key unless you can add a cause the key list does not show.
 """

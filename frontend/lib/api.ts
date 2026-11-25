@@ -3,6 +3,7 @@
  */
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+const KEY_STORAGE = 'swarmos_project_key';
 
 export interface TraceEvent {
   id: string;
@@ -38,7 +39,66 @@ export interface Trace {
   validation_results?: ValidationResult[];
 }
 
+export interface Project {
+  id: string;
+  name: string;
+  api_key?: string;
+}
+
+export class ProjectKeyError extends Error {
+  constructor(message = 'Project key was rejected') {
+    super(message);
+    this.name = 'ProjectKeyError';
+  }
+}
+
+export function getProjectKey(): string | null {
+  if (typeof window === 'undefined') return null;
+  return localStorage.getItem(KEY_STORAGE);
+}
+
+export function setProjectKey(key: string) {
+  localStorage.setItem(KEY_STORAGE, key);
+}
+
+export function clearProjectKey() {
+  localStorage.removeItem(KEY_STORAGE);
+}
+
+async function request(path: string, init?: RequestInit): Promise<Response> {
+  const headers = new Headers(init?.headers);
+  const key = getProjectKey();
+  if (key) headers.set('Authorization', `Bearer ${key}`);
+  const response = await fetch(`${API_BASE_URL}${path}`, { ...init, headers });
+  if (response.status === 401) {
+    clearProjectKey();
+    throw new ProjectKeyError();
+  }
+  return response;
+}
+
 export const api = {
+  async createProject(name: string): Promise<Project> {
+    const response = await fetch(`${API_BASE_URL}/projects`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    });
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body.detail || 'Failed to create project');
+    }
+    return response.json();
+  },
+
+  async confirmProjectKey(key: string): Promise<Project> {
+    const response = await fetch(`${API_BASE_URL}/projects/current`, {
+      headers: { Authorization: `Bearer ${key}` },
+    });
+    if (!response.ok) throw new Error('That project key was not recognized');
+    return response.json();
+  },
+
   async listTraces(params?: {
     workflow_id?: string;
     status?: string;
@@ -51,32 +111,19 @@ export const api = {
     if (params?.limit) query.set('limit', params.limit.toString());
     if (params?.offset) query.set('offset', params.offset.toString());
 
-    const response = await fetch(`${API_BASE_URL}/traces?${query}`);
+    const response = await request(`/traces?${query}`);
     if (!response.ok) throw new Error('Failed to fetch traces');
     return response.json();
   },
 
   async getTrace(id: string): Promise<Trace> {
-    const response = await fetch(`${API_BASE_URL}/traces/${id}`);
+    const response = await request(`/traces/${id}`);
     if (!response.ok) throw new Error('Failed to fetch trace');
     return response.json();
   },
 
-  async applyFix(traceId: string, findingId: string): Promise<{ path: string; summary: string; finding_id: string }> {
-    const response = await fetch(`${API_BASE_URL}/traces/${traceId}/fixes/${findingId}`, {
-      method: 'POST',
-    });
-    if (!response.ok) {
-      const body = await response.json().catch(() => ({}));
-      throw new Error(body.detail || 'Failed to apply fix');
-    }
-    return response.json();
-  },
-
   async deleteTrace(id: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/traces/${id}`, {
-      method: 'DELETE',
-    });
+    const response = await request(`/traces/${id}`, { method: 'DELETE' });
     if (!response.ok) throw new Error('Failed to delete trace');
   },
 

@@ -1,0 +1,20 @@
+name: Collaboration check
+
+on:
+  pull_request:
+
+jobs:
+  swarmos:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install SwarmOS
+        run: pip install swarmos
+      - name: Check the handoff
+        env:
+          SWARMOS_API_URL: ${{ secrets.SWARMOS_API_URL }}
+          SWARMOS_API_KEY: ${{ secrets.SWARMOS_API_KEY }}
+        run: swarmos test ./tests --workflow myapp.workflow

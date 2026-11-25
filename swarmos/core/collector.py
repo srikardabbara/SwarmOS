@@ -11,6 +11,7 @@ class EventCollector:
     """Collects and normalizes events from LangGraph callbacks."""
 
     _EXCERPT_LIMIT = 240
+    _FIELD_LIMIT = 800
 
     def __init__(self, trace: Trace):
         """Initialize event collector with a trace."""
@@ -45,6 +46,7 @@ class EventCollector:
                         "to_agent": node_name,
                         "via": "edge",
                         "passed_keys": passed_keys,
+                        "passed_fields": self._fields(state if isinstance(state, dict) else {}, passed_keys),
                         "dropped_keys": dropped,
                         "excerpt": excerpt,
                     },
@@ -102,6 +104,11 @@ class EventCollector:
                 "changed_keys": changed,
                 "cleared_keys": cleared,
                 "tool_calls": list(self._tools_this_node),
+                "wrote": {
+                    key: self._values[key]
+                    for key in changed
+                    if key in self._values and key != "messages"
+                },
                 "excerpt": self._excerpt(output if isinstance(output, dict) else {}),
                 "previous_excerpt": self._clip(" | ".join(
                     f"{key}: {value}" for key, value in before.items() if key != "messages" and value
@@ -201,20 +208,32 @@ class EventCollector:
                 parts.append(f"{key}: {self._clip(value)}")
         return self._clip(" | ".join(parts))
 
+    def _fields(self, state: Dict[str, Any], keys: list[str]) -> Dict[str, str]:
+        """Text of each field on a handoff, long enough to see what was unused."""
+        fields: Dict[str, str] = {}
+        for key in keys:
+            if key == "messages" or key not in state:
+                continue
+            text = self._value_excerpt(state.get(key))
+            if text:
+                fields[key] = text
+        return fields
+
     def _value_excerpt(self, value: Any) -> str:
         if isinstance(value, str):
-            return self._clip(value)
+            return self._clip(value, self._FIELD_LIMIT)
         if isinstance(value, (list, tuple)):
-            return self._clip(str(value))
+            return self._clip(str(value), self._FIELD_LIMIT)
         if isinstance(value, dict):
-            return self._clip(str({k: value[k] for k in list(value)[:8]}))
-        return self._clip(str(value))
+            return self._clip(str({k: value[k] for k in list(value)[:8]}), self._FIELD_LIMIT)
+        return self._clip(str(value), self._FIELD_LIMIT)
 
-    def _clip(self, text: str) -> str:
+    def _clip(self, text: str, limit: Optional[int] = None) -> str:
+        limit = self._EXCERPT_LIMIT if limit is None else limit
         text = " ".join(text.split())
-        if len(text) <= self._EXCERPT_LIMIT:
+        if len(text) <= limit:
             return text
-        return text[: self._EXCERPT_LIMIT - 1] + "…"
+        return text[: limit - 1] + "…"
 
     def _handoff_just_recorded(self, from_agent: str, to_agent: str) -> bool:
         """True when node exit already recorded this same handoff."""

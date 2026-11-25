@@ -1,12 +1,12 @@
 # SwarmOS
 
-> Testing and reliability for LangGraph multi-agent systems
+> Fail the pull request when a LangGraph handoff breaks
 
 ## What is this?
 
-SwarmOS helps you test whether your agents **collaborate correctly**—not just whether they produce good individual answers.
+SwarmOS checks whether your agents **handed the work off correctly**. A trace of the run is the evidence. The product is the check that fails the release when the next agent never received the state it needs.
 
-Building with LangGraph? Add SwarmOS to catch broken handoffs, context loss, and coordination failures before production.
+A recording of the graph is not the product. The pull request fails when the required sequence, the handoff, or a state key does not survive.
 
 ## The Problem
 

@@ -2,15 +2,27 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { api, Trace } from '@/lib/api';
+import { api, clearProjectKey, getProjectKey, ProjectKeyError, Trace } from '@/lib/api';
+import { ProjectUnlock } from '@/components/ProjectUnlock';
+import { SiteHeader } from '@/components/SiteHeader';
 import { CheckCircle2, XCircle, Clock, ArrowRight } from 'lucide-react';
 
 export default function HomePage() {
   const [traces, setTraces] = useState<Trace[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [unlocked, setUnlocked] = useState(false);
+  const [projectName, setProjectName] = useState<string | null>(null);
 
   useEffect(() => {
+    const key = getProjectKey();
+    if (!key) {
+      setUnlocked(false);
+      setLoading(false);
+      return;
+    }
+    setUnlocked(true);
+    api.confirmProjectKey(key).then((project) => setProjectName(project.name)).catch(() => {});
     loadTraces();
   }, []);
 
@@ -21,11 +33,22 @@ export default function HomePage() {
       setTraces(data);
       setError(null);
     } catch (err) {
+      if (err instanceof ProjectKeyError) {
+        setUnlocked(false);
+        return;
+      }
       setError('Failed to load traces. Is the backend running?');
       console.error(err);
     } finally {
       setLoading(false);
     }
+  }
+
+  function lockProject() {
+    clearProjectKey();
+    setUnlocked(false);
+    setTraces([]);
+    setProjectName(null);
   }
 
   function getStatusIcon(status: string) {
@@ -52,36 +75,41 @@ export default function HomePage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
-      {/* Header */}
-      <div className="border-b border-slate-700/50 bg-slate-900/50 backdrop-blur">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-3xl font-bold bg-gradient-to-r from-blue-400 via-purple-400 to-pink-400 bg-clip-text text-transparent">
-                SwarmOS
-              </h1>
-              <p className="text-slate-400 mt-1">Test agent collaboration, not just agents</p>
-            </div>
-            <div className="flex items-center gap-3">
-              <Link
-                href="/start"
-                className="px-4 py-2 bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/20 rounded-lg text-purple-200 transition-colors"
+      <SiteHeader
+        actions={
+          unlocked ? (
+            <>
+              <button
+                onClick={lockProject}
+                className="px-4 py-2 bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700/50 rounded-lg text-slate-300 transition-colors"
               >
-                Connect a workflow
-              </Link>
+                Lock{projectName ? ` ${projectName}` : ''}
+              </button>
               <button
                 onClick={loadTraces}
                 className="px-4 py-2 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/20 rounded-lg text-blue-400 transition-colors"
               >
                 Refresh
               </button>
-            </div>
-          </div>
-        </div>
-      </div>
+            </>
+          ) : null
+        }
+      />
 
       {/* Main Content */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {!unlocked && (
+          <ProjectUnlock
+            onUnlocked={(name) => {
+              setProjectName(name);
+              setUnlocked(true);
+              loadTraces();
+            }}
+          />
+        )}
+
+        {unlocked && (
+        <>
         {/* Error State */}
         {error && (
           <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-4 mb-6">
@@ -110,13 +138,16 @@ export default function HomePage() {
         {!loading && !error && traces.length === 0 && (
           <div className="text-center py-16">
             <div className="text-6xl mb-4">🤖</div>
-            <h2 className="text-2xl font-semibold text-slate-200 mb-2">No traces yet</h2>
-            <p className="text-slate-400 mb-6">Connect a LangGraph workflow, then run a collaboration check.</p>
+            <h2 className="text-2xl font-semibold text-slate-200 mb-2">No checks posted yet</h2>
+            <p className="text-slate-400 mb-6 max-w-xl mx-auto">
+              This project is open. Runs show up here after <span className="text-slate-200">swarmos test</span> posts
+              them with this project’s key. The setup steps name the handoff the pull request must keep.
+            </p>
             <Link
               href="/start"
               className="inline-flex items-center px-4 py-2 bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/20 rounded-lg text-purple-200 transition-colors"
             >
-              Connect a workflow
+              Instructions
               <ArrowRight className="w-4 h-4 ml-2" />
             </Link>
           </div>
@@ -188,6 +219,8 @@ export default function HomePage() {
               ))}
             </div>
           </div>
+        )}
+        </>
         )}
       </div>
     </div>

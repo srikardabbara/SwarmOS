@@ -1,0 +1,25 @@
+name: "Executive research handoff"
+description: "Research reaches the analyst, and the analyst's figure reaches the exec report"
+
+input:
+  messages:
+    - role: user
+      content: "Prepare the infrastructure spend briefing for the executive team"
+  research_brief: ""
+  analysis: ""
+  exec_report: ""
+
+expectations:
+  - type: agent_sequence
+    agents: ["researcher", "analyst", "presenter"]
+
+  - type: handoff_occurred
+    from: "researcher"
+    to: "analyst"
+
+  - type: handoff_occurred
+    from: "analyst"
+    to: "presenter"
+
+  - type: context_preserved
+    required_keys: ["research_brief", "analysis", "exec_report"]

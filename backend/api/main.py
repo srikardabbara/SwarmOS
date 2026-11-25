@@ -1,16 +1,22 @@
 """Main FastAPI application."""
 
+import hashlib
 import json
+import os
+import secrets
 from datetime import datetime
 from typing import List, Optional
+from uuid import uuid4
 
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from backend.models.database import (
     EventDB,
+    ProjectDB,
     TraceDB,
     ValidationResultDB,
     get_db,
@@ -24,14 +30,41 @@ app = FastAPI(
     version="0.1.0",
 )
 
-# Add CORS middleware
+def _dashboard_origins() -> List[str]:
+    configured = os.environ.get("SWARMOS_DASHBOARD_ORIGIN", "http://localhost:3000")
+    return [origin.strip() for origin in configured.split(",") if origin.strip()]
+
+
+# The dashboard origin is the only browser allowed to call this API.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins for development
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=_dashboard_origins(),
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
 )
+
+_bearer = HTTPBearer(auto_error=False)
+
+
+def hash_key(api_key: str) -> str:
+    """Hash a project ingest key. The plaintext is shown once at creation."""
+    return hashlib.sha256(api_key.encode()).hexdigest()
+
+
+def require_project(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(_bearer),
+    db: Session = Depends(get_db),
+) -> ProjectDB:
+    """Resolve the project for this request, or reject it."""
+    if credentials is None or not credentials.credentials:
+        raise HTTPException(status_code=401, detail="Missing project key")
+    project = (
+        db.query(ProjectDB).filter(ProjectDB.key_hash == hash_key(credentials.credentials)).first()
+    )
+    if project is None:
+        raise HTTPException(status_code=401, detail="Invalid project key")
+    return project
 
 
 # Pydantic models for API requests/responses
@@ -153,9 +186,54 @@ async def health_check():
     return {"status": "healthy", "timestamp": datetime.utcnow().isoformat()}
 
 
+class ProjectCreate(BaseModel):
+    """Name for a new project."""
+
+    name: str
+
+
+class ProjectCreated(BaseModel):
+    """Project plus the ingest key. The key is not stored in plaintext."""
+
+    id: str
+    name: str
+    api_key: str
+
+
+class ProjectResponse(BaseModel):
+    """Project identity returned when a key is presented."""
+
+    id: str
+    name: str
+
+
+@app.post("/projects", response_model=ProjectCreated, status_code=201)
+async def create_project(body: ProjectCreate, db: Session = Depends(get_db)):
+    """Create a project and return its ingest key once."""
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Project name is required")
+
+    api_key = f"swarmos_{secrets.token_urlsafe(32)}"
+    project = ProjectDB(id=str(uuid4()), name=name, key_hash=hash_key(api_key))
+    db.add(project)
+    db.commit()
+    return ProjectCreated(id=project.id, name=project.name, api_key=api_key)
+
+
+@app.get("/projects/current", response_model=ProjectResponse)
+async def current_project(project: ProjectDB = Depends(require_project)):
+    """Confirm a project key and return the project it unlocks."""
+    return ProjectResponse(id=project.id, name=project.name)
+
+
 # Trace endpoints
 @app.post("/traces", response_model=TraceResponse, status_code=201)
-async def create_trace(trace: TraceCreate, db: Session = Depends(get_db)):
+async def create_trace(
+    trace: TraceCreate,
+    project: ProjectDB = Depends(require_project),
+    db: Session = Depends(get_db),
+):
     """Create a new trace."""
     # Check if trace already exists
     existing = db.query(TraceDB).filter(TraceDB.id == trace.id).first()
@@ -165,6 +243,7 @@ async def create_trace(trace: TraceCreate, db: Session = Depends(get_db)):
     # Create trace
     db_trace = TraceDB(
         id=trace.id,
+        project_id=project.id,
         test_id=trace.test_id,
         workflow_id=trace.workflow_id,
         started_at=trace.started_at,
@@ -224,10 +303,11 @@ async def list_traces(
     status: Optional[str] = Query(None),
     limit: int = Query(100, ge=1, le=1000),
     offset: int = Query(0, ge=0),
+    project: ProjectDB = Depends(require_project),
     db: Session = Depends(get_db),
 ):
     """List traces with optional filtering."""
-    query = db.query(TraceDB)
+    query = db.query(TraceDB).filter(TraceDB.project_id == project.id)
 
     if workflow_id:
         query = query.filter(TraceDB.workflow_id == workflow_id)
@@ -254,9 +334,17 @@ async def list_traces(
 
 
 @app.get("/traces/{trace_id}", response_model=TraceWithDetails)
-async def get_trace(trace_id: str, db: Session = Depends(get_db)):
+async def get_trace(
+    trace_id: str,
+    project: ProjectDB = Depends(require_project),
+    db: Session = Depends(get_db),
+):
     """Get a specific trace with all details."""
-    trace = db.query(TraceDB).filter(TraceDB.id == trace_id).first()
+    trace = (
+        db.query(TraceDB)
+        .filter(TraceDB.id == trace_id, TraceDB.project_id == project.id)
+        .first()
+    )
 
     if not trace:
         raise HTTPException(status_code=404, detail=f"Trace {trace_id} not found")
@@ -308,57 +396,18 @@ async def get_trace(trace_id: str, db: Session = Depends(get_db)):
     )
 
 
-class FixResponse(BaseModel):
-    """Result of applying a communication fix."""
-
-    path: str
-    summary: str
-    finding_id: str
-
-
-@app.post("/traces/{trace_id}/fixes/{finding_id}", response_model=FixResponse)
-async def apply_trace_fix(trace_id: str, finding_id: str, db: Session = Depends(get_db)):
-    """Edit the workflow so this communication finding is fixed."""
-    trace = db.query(TraceDB).filter(TraceDB.id == trace_id).first()
-    if not trace:
-        raise HTTPException(status_code=404, detail=f"Trace {trace_id} not found")
-
-    metadata = json.loads(trace.metadata or "{}")
-    review = metadata.get("communication_review") or {}
-    findings = review.get("findings") or []
-    finding = next((item for item in findings if item.get("id") == finding_id), None)
-    if finding is None:
-        raise HTTPException(status_code=404, detail=f"Finding {finding_id} not found")
-    if finding.get("applied"):
-        return FixResponse(
-            path=finding.get("applied_path") or "",
-            summary="This fix was already applied.",
-            finding_id=finding_id,
-        )
-    if not finding.get("fix"):
-        raise HTTPException(status_code=400, detail="This finding has steps, but SwarmOS cannot edit it automatically")
-
-    from swarmos.review.fixes import apply_fix
-
-    try:
-        result = apply_fix(finding["fix"])
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-
-    finding["applied"] = True
-    finding["applied_path"] = result["path"]
-    review["findings"] = findings
-    metadata["communication_review"] = review
-    trace.metadata = json.dumps(metadata)
-    db.commit()
-
-    return FixResponse(path=result["path"], summary=result["summary"], finding_id=finding_id)
-
-
 @app.delete("/traces/{trace_id}", status_code=204)
-async def delete_trace(trace_id: str, db: Session = Depends(get_db)):
+async def delete_trace(
+    trace_id: str,
+    project: ProjectDB = Depends(require_project),
+    db: Session = Depends(get_db),
+):
     """Delete a trace."""
-    trace = db.query(TraceDB).filter(TraceDB.id == trace_id).first()
+    trace = (
+        db.query(TraceDB)
+        .filter(TraceDB.id == trace_id, TraceDB.project_id == project.id)
+        .first()
+    )
 
     if not trace:
         raise HTTPException(status_code=404, detail=f"Trace {trace_id} not found")

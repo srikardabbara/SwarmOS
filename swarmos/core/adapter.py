@@ -148,6 +148,7 @@ class SwarmOSAdapter:
         self,
         workflow_id: str = "default",
         api_url: Optional[str] = None,
+        api_key: Optional[str] = None,
         auto_send: bool = False,
     ):
         """
@@ -156,10 +157,12 @@ class SwarmOSAdapter:
         Args:
             workflow_id: Identifier for this workflow
             api_url: Optional URL to send traces to SwarmOS backend
+            api_key: Project ingest key sent as a bearer token
             auto_send: Whether to automatically send traces when complete
         """
         self.workflow_id = workflow_id
         self.api_url = api_url
+        self.api_key = api_key
         self.auto_send = auto_send
         
         # Create a new trace
@@ -283,10 +286,15 @@ class SwarmOSAdapter:
                 ],
             }
 
+            headers = {}
+            if self.api_key:
+                headers["Authorization"] = f"Bearer {self.api_key}"
+
             # Send to backend
             response = httpx.post(
                 f"{self.api_url}/traces",
                 json=trace_data,
+                headers=headers,
                 timeout=10.0,
             )
             response.raise_for_status()

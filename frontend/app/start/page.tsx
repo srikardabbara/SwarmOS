@@ -1,102 +1,139 @@
+import type { ReactNode } from 'react';
 import type { Metadata } from 'next';
 import Link from 'next/link';
+import { SiteHeader } from '@/components/SiteHeader';
 
 export const metadata: Metadata = {
-  title: 'Connect a workflow · SwarmOS',
-  description: 'Point a LangGraph workflow at SwarmOS and check that the agents collaborate.',
+  title: 'Instructions',
+  description: 'Copy the agent name from LangSmith, paste it into SwarmOS, and open the finished run on Runs.',
 };
 
-const steps = [
+function Callout({
+  from,
+  title,
+  children,
+}: {
+  from: boolean;
+  title: string;
+  children: ReactNode;
+}) {
+  return (
+    <div
+      className={`mt-3 rounded-lg border p-3 ${
+        from ? 'border-blue-400/40 bg-blue-500/10' : 'border-amber-400/40 bg-amber-500/10'
+      }`}
+    >
+      <p className={`text-xs font-semibold uppercase tracking-wide ${from ? 'text-blue-200' : 'text-amber-200'}`}>
+        {title}
+      </p>
+      <div className="mt-1 text-sm leading-relaxed text-slate-200">{children}</div>
+    </div>
+  );
+}
+
+const steps: {
+  title: string;
+  body: string;
+  from?: ReactNode;
+  paste?: ReactNode;
+  code?: string;
+}[] = [
   {
-    title: 'Install SwarmOS beside the graph',
-    body: 'Run this in the project that already contains the LangGraph app. The graph stays where it is.',
-    code: `pip install -e /path/to/SwarmOS`,
+    title: 'Get the folder, not just the chat',
+    body: 'The LangSmith page where you typed a message is a test of the agent. SwarmOS needs the files behind that chat.',
+    from: (
+      <>
+        In LangSmith Studio, click <span className="text-slate-100">Files</span> at the top of the chat.
+        Download that project, or open the folder already on your computer. If Files is empty, ask the
+        person who built the agent for the folder. The chat box alone is not enough.
+      </>
+    ),
   },
   {
-    title: 'Leave the API running',
-    body: 'This dashboard reads from the API on port 8000. Start it from the SwarmOS repo if the Runs page cannot load traces.',
-    code: `cd backend
-python -m uvicorn api.main:app --reload --port 8000`,
+    title: 'Make a project and save the key',
+    body: 'This key is the password that lets the run show up on this website.',
+    paste: (
+      <>
+        On this site, click <Link href="/" className="text-blue-300 hover:text-blue-200">Runs</Link>.
+        Under Create a project, type the name you saw in LangSmith, such as Schedule manager.
+        Click Create project key. Copy the key that starts with <span className="text-slate-100">swarmos_</span> into
+        Notes. SwarmOS shows it once.
+      </>
+    ),
   },
   {
-    title: 'Expose the compiled graph as one function',
-    body: 'Do not rewrite the agents. SwarmOS calls this function and passes its own callback in config.',
+    title: 'Add SwarmOS next to the agent',
+    body: 'Open Terminal. Go into the folder from step 1. Paste this and press Enter.',
+    code: 'pip install swarmos',
+  },
+  {
+    title: 'Copy the agent names into the test file',
+    body: 'SwarmOS has to use the same names LangSmith already uses. It does not invent them.',
+    from: (
+      <>
+        In LangSmith, look at the Turns list in the middle. The blue row is the agent name, such as{' '}
+        <span className="text-slate-100">deep_agent</span>. If several agents are listed, write them down in that order.
+      </>
+    ),
+    paste: (
+      <>
+        In Terminal, run the first line below. Then open <span className="text-slate-100">tests/schedule-manager.yaml</span> and
+        replace the sample names with the names you just copied.
+      </>
+    ),
+    code: 'swarmos init --name schedule-manager',
+  },
+  {
+    title: 'Let SwarmOS start the same agent the chat starts',
+    body: 'One function tells SwarmOS how to press go.',
+    from: (
+      <>
+        In the LangChain folder, open the Python file that builds the agent. Find the line that finishes it.
+        It looks like <span className="text-slate-100">app = workflow.compile()</span> or{' '}
+        <span className="text-slate-100">agent = create_agent(...)</span>. Remember that word,{' '}
+        <span className="text-slate-100">app</span> or <span className="text-slate-100">agent</span>.
+      </>
+    ),
+    paste: (
+      <>
+        Paste these lines at the bottom of that same file. If the word you found was{' '}
+        <span className="text-slate-100">agent</span>, use <span className="text-slate-100">agent.invoke</span> instead of{' '}
+        <span className="text-slate-100">app.invoke</span>.
+      </>
+    ),
     code: `def run_workflow(input_data, config):
     return app.invoke(input_data, config)`,
   },
   {
-    title: 'Write the collaboration you expect',
-    body: 'One YAML file. Agent names must match the names you passed to add_node. This file is the investigation: the order, the handoff, and the state that must survive it.',
-    code: `name: "Cancel subscription"
-description: "Support hands the account to billing with the ids intact"
-
-input:
-  messages:
-    - role: user
-      content: "I want to cancel my subscription"
-
-expectations:
-  - type: agent_sequence
-    agents: ["support", "billing"]
-
-  - type: handoff_occurred
-    from: "support"
-    to: "billing"
-
-  - type: context_preserved
-    required_keys: ["user_id", "subscription_id"]`,
-  },
-  {
-    title: 'Run the check',
-    body: 'The executor runs the graph, applies the YAML, and posts the pass or fail here.',
-    code: `from swarmos.runner import TestExecutor, load_scenario
-
-scenario = load_scenario("tests/cancel_subscription.yaml")
-executor = TestExecutor(api_url="http://localhost:8000")
-
-result = executor.run_scenario(
-    scenario,
-    run_workflow,
-    workflow_id="cancel-subscription",
-)
-executor.print_result(result)`,
+    title: 'Run it',
+    body: 'This sends one run from your folder to the SwarmOS project you created.',
+    paste: (
+      <>
+        Paste the key from step 2 after <span className="text-slate-100">SWARMOS_API_KEY=</span>.
+        Replace <span className="text-slate-100">FILE_NAME</span> with the Python file from step 5, without{' '}
+        <span className="text-slate-100">.py</span>. If that file is <span className="text-slate-100">graph.py</span>, type{' '}
+        <span className="text-slate-100">graph</span>.
+      </>
+    ),
+    code: `export SWARMOS_API_URL=http://localhost:8000
+export SWARMOS_API_KEY=
+swarmos test ./tests --workflow FILE_NAME`,
   },
 ];
 
 export default function StartPage() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
-      <div className="border-b border-slate-700/50 bg-slate-900/50 backdrop-blur">
-        <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <Link
-                href="/"
-                className="text-3xl font-bold bg-gradient-to-r from-blue-400 via-purple-400 to-pink-400 bg-clip-text text-transparent"
-              >
-                SwarmOS
-              </Link>
-              <p className="text-slate-400 mt-1">Test agent collaboration, not just agents</p>
-            </div>
-            <Link
-              href="/"
-              className="px-4 py-2 bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700/50 rounded-lg text-slate-200 transition-colors"
-            >
-              Runs
-            </Link>
-          </div>
-        </div>
-      </div>
+      <SiteHeader />
 
       <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
-        <p className="text-sm font-medium text-purple-300">Connect a workflow</p>
+        <p className="text-sm font-medium text-purple-300">Instructions</p>
         <h1 className="mt-2 text-3xl font-semibold text-slate-100">
-          Check the handoff, then read the result here
+          Connect the agent you already built
         </h1>
         <p className="mt-4 text-slate-300 leading-relaxed">
-          Each agent can look fine on its own and still drop the account id on the way to the
-          next one. SwarmOS runs the graph you already have and checks the collaboration: who
-          ran, whether control moved, and whether the state keys you care about were still there.
+          Blue boxes are what you copy from LangSmith or the LangChain folder. Amber boxes are
+          where you paste it. When the last command finishes, the result is on Runs, on this site.
         </p>
 
         <ol className="mt-10 space-y-8">
@@ -108,59 +145,46 @@ export default function StartPage() {
               <div className="min-w-0 flex-1">
                 <h2 className="text-lg font-medium text-slate-100">{step.title}</h2>
                 <p className="mt-1 text-sm leading-relaxed text-slate-400">{step.body}</p>
-                <pre className="mt-3 overflow-x-auto rounded-lg border border-slate-700/40 bg-slate-950/70 p-4 text-sm leading-relaxed text-slate-200">
-                  <code>{step.code}</code>
-                </pre>
+                {step.from && <Callout from title="Copy this from LangSmith or LangChain">{step.from}</Callout>}
+                {step.paste && <Callout from={false} title="Paste it here">{step.paste}</Callout>}
+                {step.code && (
+                  <pre className="mt-3 overflow-x-auto rounded-lg border border-slate-700/40 bg-slate-950/70 p-4 text-sm leading-relaxed text-slate-200">
+                    <code>{step.code}</code>
+                  </pre>
+                )}
               </div>
             </li>
           ))}
         </ol>
 
-        <section className="mt-10 rounded-lg border border-slate-700/40 bg-slate-800/30 p-5">
-          <h2 className="text-lg font-medium text-slate-100">Read the run</h2>
-          <p className="mt-2 text-sm leading-relaxed text-slate-400">
-            Open <Link href="/" className="text-blue-300 hover:text-blue-200">Runs</Link> and
-            refresh. A green count means every check held. Open the run when a check is red:
-            the graph shows where the agents stopped, and the failing check names the missing
-            handoff or the state key that disappeared.
+        <section className="mt-12 rounded-lg border border-green-400/30 bg-green-500/10 p-5">
+          <p className="text-xs font-semibold uppercase tracking-wide text-green-200">The finished result</p>
+          <h2 className="mt-1 text-xl font-medium text-slate-100">Open it on Runs</h2>
+          <p className="mt-2 text-sm leading-relaxed text-slate-300">
+            Stay on this website. Click <Link href="/" className="text-blue-300 hover:text-blue-200">Runs</Link> in
+            the top bar, then Refresh. Click the new row. That page is the output. You do not go back to LangSmith to read it.
           </p>
-          <ul className="mt-4 space-y-2 text-sm text-slate-300">
+          <ul className="mt-4 space-y-2 text-sm text-slate-200">
             <li>
-              <span className="text-slate-100">agent_sequence</span>
-              <span className="text-slate-400"> — these agents ran, in this order.</span>
+              <span className="text-slate-100">What each agent passed on.</span>
+              <span className="text-slate-400"> The text one agent handed the next, in order.</span>
             </li>
             <li>
-              <span className="text-slate-100">handoff_occurred</span>
-              <span className="text-slate-400"> — control moved from one agent to the next. A fixed edge counts.</span>
+              <span className="text-slate-100">Communication review.</span>
+              <span className="text-slate-400"> Text that was sent and never used, with an approximate token count, and a number that changed between agents.</span>
             </li>
             <li>
-              <span className="text-slate-100">context_preserved</span>
-              <span className="text-slate-400"> — these state keys were still present at the end.</span>
+              <span className="text-slate-100">Validation results.</span>
+              <span className="text-slate-400"> Whether the agents ran in the order you pasted into the test file.</span>
             </li>
           </ul>
-        </section>
-
-        <section className="mt-6 rounded-lg border border-slate-700/40 bg-slate-800/30 p-5">
-          <h2 className="text-lg font-medium text-slate-100">See one run before you write a test</h2>
-          <p className="mt-2 text-sm leading-relaxed text-slate-400">
-            This posts the graph and the timeline. It does not decide pass or fail. Use the YAML
-            file when you want an investigation you can rerun.
+          <p className="mt-4 text-sm leading-relaxed text-slate-400">
+            One agent, such as <span className="text-slate-200">deep_agent</span> talking only to a model, still
+            produces a run. The handoff section fills in when a second agent is in the same folder.
+            A sample of a finished multi-agent run is <span className="text-slate-200">examples/exec_report.py</span> in
+            the SwarmOS project: the checks can all pass, and the page still shows research that was ignored
+            and a figure that changed from 18% to 11%.
           </p>
-          <pre className="mt-3 overflow-x-auto rounded-lg border border-slate-700/40 bg-slate-950/70 p-4 text-sm leading-relaxed text-slate-200">
-            <code>{`from swarmos import SwarmOSAdapter
-
-adapter = SwarmOSAdapter(
-    workflow_id="cancel-subscription",
-    api_url="http://localhost:8000",
-    auto_send=True,
-)
-adapter.start_trace(input_data)
-result = app.invoke(
-    input_data,
-    config={"callbacks": [adapter.callback_handler]},
-)
-adapter.end_trace(result)`}</code>
-          </pre>
         </section>
       </div>
     </div>

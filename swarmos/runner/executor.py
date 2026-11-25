@@ -40,15 +40,17 @@ class TestResult:
 class TestExecutor:
     """Executes test scenarios against workflows."""
 
-    def __init__(self, api_url: Optional[str] = None):
+    def __init__(self, api_url: Optional[str] = None, api_key: Optional[str] = None):
         """Initialize test executor.
 
         Args:
             api_url: When set, the finished trace is posted to the SwarmOS API
                 so the dashboard can show the pass or fail.
+            api_key: Project ingest key required by a hosted API.
         """
         self.validator_registry = get_registry()
         self.api_url = api_url
+        self.api_key = api_key
 
     def run_scenario(
         self,
@@ -71,7 +73,11 @@ class TestExecutor:
         workflow_id = workflow_id or scenario.name
 
         # Create adapter and start trace
-        adapter = SwarmOSAdapter(workflow_id=workflow_id, api_url=self.api_url)
+        adapter = SwarmOSAdapter(
+            workflow_id=workflow_id,
+            api_url=self.api_url,
+            api_key=self.api_key,
+        )
         adapter.trace.test_id = scenario.name
         adapter.start_trace(scenario.input_data)
 
@@ -231,6 +237,8 @@ class TestExecutor:
             for finding in findings:
                 print(f"  [{finding.get('severity')}] {finding.get('category')}: {finding.get('message')}")
                 print(f"    {finding.get('recommendation')}")
+                if finding.get("fix") and finding.get("id"):
+                    print(f"    Apply on your machine: swarmos apply {result.trace.id} {finding['id']}")
 
         print(f"{'='*70}\n")
 
