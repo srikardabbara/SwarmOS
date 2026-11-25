@@ -127,6 +127,19 @@ export const api = {
     if (!response.ok) throw new Error('Failed to delete trace');
   },
 
+  async importLangSmith(apiKey: string, url: string): Promise<Trace> {
+    const response = await request('/langsmith/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ api_key: apiKey, url }),
+    });
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body.detail || 'Could not read that LangSmith trace');
+    }
+    return response.json();
+  },
+
   async health(): Promise<{ status: string; timestamp: string }> {
     const response = await fetch(`${API_BASE_URL}/health`);
     if (!response.ok) throw new Error('Backend unhealthy');

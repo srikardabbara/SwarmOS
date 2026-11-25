@@ -250,6 +250,68 @@ def _load_run_workflow(module_path: str):
 
 
 @cli.command()
+def langsmith():
+    """
+    Analyze the newest trace in the connected LangSmith project.
+
+    Set these once, then run this whenever you want a new analysis:
+
+        export LANGSMITH_API_KEY=...
+        export LANGSMITH_PROJECT="your agent name"
+        export SWARMOS_API_URL=http://localhost:8000
+        export SWARMOS_API_KEY=swarmos_...
+        swarmos langsmith
+    """
+    import httpx
+
+    from swarmos.langsmith.import_trace import LangSmithImportError, import_latest_langsmith
+
+    langsmith_key = os.environ.get("LANGSMITH_API_KEY", "").strip()
+    project = os.environ.get("LANGSMITH_PROJECT", "").strip()
+    api_url = os.environ.get("SWARMOS_API_URL", "http://localhost:8000").strip().rstrip("/")
+    api_key = os.environ.get("SWARMOS_API_KEY", "").strip()
+    missing = [
+        name
+        for name, value in (
+            ("LANGSMITH_API_KEY", langsmith_key),
+            ("LANGSMITH_PROJECT", project),
+            ("SWARMOS_API_KEY", api_key),
+        )
+        if not value
+    ]
+    if missing:
+        click.echo("Set " + ", ".join(missing) + " once, then run swarmos langsmith again.", err=True)
+        sys.exit(1)
+
+    try:
+        trace = import_latest_langsmith(langsmith_key, project)
+    except LangSmithImportError as exc:
+        click.echo(str(exc), err=True)
+        sys.exit(1)
+
+    try:
+        response = httpx.post(
+            f"{api_url}/traces",
+            json=trace.model_dump(mode="json"),
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=30.0,
+        )
+        response.raise_for_status()
+    except Exception as exc:
+        click.echo(f"The analysis ran, and posting it to SwarmOS failed: {exc}", err=True)
+        sys.exit(1)
+
+    review = trace.metadata.get("communication_review") or {}
+    click.echo(f"Analyzed the newest trace: {trace.workflow_id}")
+    click.echo(f"{review.get('error_count', 0)} errors, {review.get('waste_count', 0)} waste")
+    for finding in review.get("findings") or []:
+        click.echo(f"- {finding.get('message')}")
+    if not review.get("findings"):
+        click.echo("No broken or wasteful handoffs on this trace.")
+    click.echo(f"Open http://localhost:3000/traces/{trace.id}")
+
+
+@cli.command()
 @click.argument("trace_id")
 @click.argument("finding_id")
 def apply(trace_id: str, finding_id: str):

@@ -4,6 +4,61 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { api, setProjectKey } from '@/lib/api';
 
+export function ConnectWalkthrough({
+  projectKey,
+  includeKey = false,
+}: {
+  projectKey?: string | null;
+  includeKey?: boolean;
+}) {
+  const keyLine = projectKey ? `export SWARMOS_API_KEY=${projectKey}` : 'export SWARMOS_API_KEY=';
+  return (
+    <div className="mt-6 space-y-5 text-sm leading-relaxed text-slate-300">
+      {includeKey && (
+        <div>
+          <p className="font-medium text-slate-100">1. Your project key</p>
+          <p className="mt-1 text-slate-400">
+            This is <span className="text-slate-200">SWARMOS_API_KEY</span>. It is already filled in below.
+          </p>
+          {projectKey && (
+            <pre className="mt-2 overflow-x-auto rounded-lg border border-slate-700/40 bg-slate-950/70 p-4 text-slate-200">
+              {projectKey}
+            </pre>
+          )}
+        </div>
+      )}
+      <div>
+        <p className="font-medium text-slate-100">2. Copy the LangSmith key and the Tracing page</p>
+        <p className="mt-1 text-slate-400">
+          In LangSmith, open Settings, then API Keys. Choose Personal Access Token so SwarmOS can read your workspace traces when you run the command. Service Key is for an unattended job. Tracing Only writes new traces. Copy the key, then open the agent’s Tracing page and copy that address.
+        </p>
+      </div>
+      <div>
+        <p className="font-medium text-slate-100">3. Save the connection in Terminal</p>
+        <p className="mt-1 text-slate-400">
+          Run this in any folder. Put your LangSmith key on the blank line, and put the agent name, or the ID beside it, in quotes.
+        </p>
+        <pre className="mt-2 overflow-x-auto rounded-lg border border-slate-700/40 bg-slate-950/70 p-4 text-slate-200">{`pip install swarmos
+export LANGSMITH_API_KEY=
+export LANGSMITH_PROJECT="your agent name"
+export SWARMOS_API_URL=${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}
+${keyLine}`}</pre>
+      </div>
+      <div>
+        <p className="font-medium text-slate-100">4. Run an analysis whenever you want one</p>
+        <pre className="mt-2 overflow-x-auto rounded-lg border border-slate-700/40 bg-slate-950/70 p-4 text-slate-200">swarmos langsmith</pre>
+        <p className="mt-2 text-slate-400">
+          This reads the newest row on that Tracing page and posts it here. Run it again after the agent has a new conversation.
+        </p>
+      </div>
+      <p>
+        The same steps, with each LangSmith click, are on{' '}
+        <Link href="/start" className="text-blue-300 hover:text-blue-200">Instructions</Link>.
+      </p>
+    </div>
+  );
+}
+
 export function ProjectUnlock({ onUnlocked }: { onUnlocked: (name: string) => void }) {
   const [name, setName] = useState('');
   const [existingKey, setExistingKey] = useState('');
@@ -43,24 +98,15 @@ export function ProjectUnlock({ onUnlocked }: { onUnlocked: (name: string) => vo
   if (createdKey) {
     return (
       <div className="max-w-2xl mx-auto bg-slate-800/40 border border-slate-700/40 rounded-lg p-6">
-        <p className="text-sm font-medium text-purple-300">Step 1 of the setup</p>
-        <h2 className="mt-1 text-xl font-semibold text-slate-100">Save this project key</h2>
+        <p className="text-sm font-medium text-purple-300">1. Your project key</p>
+        <h2 className="mt-1 text-xl font-semibold text-slate-100">Copy this key, then finish the connection</h2>
         <p className="mt-2 text-sm leading-relaxed text-slate-400">
-          SwarmOS shows the key once. It is the password for this project. CI uses it as{' '}
-          <span className="text-slate-200">SWARMOS_API_KEY</span> so pull-request runs land here.
-          A teammate pastes the same key into “Open a project you already have” on their machine.
+          SwarmOS shows this key once. It is <span className="text-slate-200">SWARMOS_API_KEY</span> in the terminal command below, and it is how this browser opens the project later.
         </p>
         <pre className="mt-4 overflow-x-auto rounded-lg border border-slate-700/40 bg-slate-950/70 p-4 text-sm text-slate-200">
           {createdKey}
         </pre>
-        <ol className="mt-4 space-y-2 text-sm text-slate-300 list-decimal pl-5">
-          <li>Copy the key into a password manager and into the GitHub secret <span className="text-slate-100">SWARMOS_API_KEY</span>.</li>
-          <li>
-            Follow the <Link href="/start" className="text-blue-300 hover:text-blue-200">Instructions</Link> to
-            add the handoff check in the repo that already has the graph.
-          </li>
-          <li>Come back to Runs. A failed check names the agent that dropped the state.</li>
-        </ol>
+        <ConnectWalkthrough projectKey={createdKey} />
         <button
           type="button"
           onClick={() => onUnlocked(name.trim())}
@@ -74,14 +120,13 @@ export function ProjectUnlock({ onUnlocked }: { onUnlocked: (name: string) => vo
 
   return (
     <div className="max-w-3xl mx-auto">
-      <p className="text-sm font-medium text-purple-300">What you are opening</p>
+      <p className="text-sm font-medium text-purple-300">Connect a project</p>
       <h2 className="mt-1 text-2xl font-semibold text-slate-100">
-        A project is the set of handoff checks for one app
+        Start with a project key
       </h2>
       <p className="mt-3 text-sm leading-relaxed text-slate-400">
-        LangGraph runs the graph. LangSmith records the run. SwarmOS is the layer that shows
-        what each node handed the next one, what went unused, and which fact changed. The two
-        boxes below only decide which project this browser can see. The full setup is on{' '}
+        Create the project once. SwarmOS shows the key, then the rest of the connection: the LangSmith key, the Tracing page, and <span className="text-slate-200">swarmos langsmith</span>.
+        The click-by-click version is on{' '}
         <Link href="/start" className="text-blue-300 hover:text-blue-200">Instructions</Link>.
       </p>
 
@@ -90,8 +135,7 @@ export function ProjectUnlock({ onUnlocked }: { onUnlocked: (name: string) => vo
           <p className="text-xs font-medium uppercase tracking-wide text-purple-300">First time</p>
           <h3 className="mt-1 text-lg font-semibold text-slate-100">Create a project</h3>
           <p className="mt-2 text-sm leading-relaxed text-slate-400">
-            Use this once per app. The name is a label for the runs, such as the workflow you are
-            about to check. It does not choose the agents. SwarmOS then gives you a key.
+            Use the name of your LangSmith project. SwarmOS then shows the project key once.
           </p>
           <label htmlFor="project-name" className="mt-4 block text-xs text-slate-300">
             Project name
@@ -100,7 +144,7 @@ export function ProjectUnlock({ onUnlocked }: { onUnlocked: (name: string) => vo
             id="project-name"
             value={name}
             onChange={(event) => setName(event.target.value)}
-            placeholder="Cancel subscription"
+            placeholder="Your LangSmith project"
             className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-950/60 px-3 py-2 text-slate-100"
           />
           <button
@@ -117,8 +161,7 @@ export function ProjectUnlock({ onUnlocked }: { onUnlocked: (name: string) => vo
           <p className="text-xs font-medium uppercase tracking-wide text-blue-300">Already set up</p>
           <h3 className="mt-1 text-lg font-semibold text-slate-100">Open a project you already have</h3>
           <p className="mt-2 text-sm leading-relaxed text-slate-400">
-            Paste a key you saved, or one a teammate shared. This browser then lists that
-            project’s runs. It does not create a second project, and it does not run a test.
+            Paste a key you saved. This browser then lists that project’s runs.
           </p>
           <label htmlFor="project-key" className="mt-4 block text-xs text-slate-300">
             Project key

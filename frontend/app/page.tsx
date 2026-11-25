@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { api, clearProjectKey, getProjectKey, ProjectKeyError, Trace } from '@/lib/api';
-import { ProjectUnlock } from '@/components/ProjectUnlock';
+import { ConnectWalkthrough, ProjectUnlock } from '@/components/ProjectUnlock';
 import { SiteHeader } from '@/components/SiteHeader';
 import { CheckCircle2, XCircle, Clock, ArrowRight } from 'lucide-react';
 
@@ -136,20 +136,14 @@ export default function HomePage() {
 
         {/* Empty State */}
         {!loading && !error && traces.length === 0 && (
-          <div className="text-center py-16">
-            <div className="text-6xl mb-4">🤖</div>
-            <h2 className="text-2xl font-semibold text-slate-200 mb-2">No checks posted yet</h2>
-            <p className="text-slate-400 mb-6 max-w-xl mx-auto">
-              This project is open. Runs show up here after <span className="text-slate-200">swarmos test</span> posts
-              them with this project’s key. The setup steps name the handoff the pull request must keep.
+          <div className="max-w-2xl mx-auto bg-slate-800/40 border border-slate-700/40 rounded-lg p-6">
+            <h2 className="text-xl font-semibold text-slate-100">Finish connecting this project</h2>
+            <p className="mt-2 text-sm leading-relaxed text-slate-400">
+              {projectName ? `${projectName} is open. ` : ''}
+              Analyses show up in this list after the command below. The click-by-click version is on{' '}
+              <Link href="/start" className="text-blue-300 hover:text-blue-200">Instructions</Link>.
             </p>
-            <Link
-              href="/start"
-              className="inline-flex items-center px-4 py-2 bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/20 rounded-lg text-purple-200 transition-colors"
-            >
-              Instructions
-              <ArrowRight className="w-4 h-4 ml-2" />
-            </Link>
+            <ConnectWalkthrough projectKey={getProjectKey()} includeKey />
           </div>
         )}
 

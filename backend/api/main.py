@@ -14,6 +14,8 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from swarmos.langsmith.import_trace import LangSmithImportError, import_langsmith_trace
+
 from backend.models.database import (
     EventDB,
     ProjectDB,
@@ -228,19 +230,19 @@ async def current_project(project: ProjectDB = Depends(require_project)):
 
 
 # Trace endpoints
-@app.post("/traces", response_model=TraceResponse, status_code=201)
-async def create_trace(
-    trace: TraceCreate,
-    project: ProjectDB = Depends(require_project),
-    db: Session = Depends(get_db),
-):
-    """Create a new trace."""
-    # Check if trace already exists
+class LangSmithImportRequest(BaseModel):
+    """A LangSmith trace address and the key used once to read it."""
+
+    api_key: str
+    url: str
+
+
+def _persist_trace(trace: TraceCreate, project: ProjectDB, db: Session) -> TraceDB:
+    """Store a trace for one project. Rejects an id that is already stored."""
     existing = db.query(TraceDB).filter(TraceDB.id == trace.id).first()
     if existing:
         raise HTTPException(status_code=409, detail=f"Trace {trace.id} already exists")
 
-    # Create trace
     db_trace = TraceDB(
         id=trace.id,
         project_id=project.id,
@@ -283,7 +285,10 @@ async def create_trace(
 
     db.commit()
     db.refresh(db_trace)
+    return db_trace
 
+
+def _trace_response(db_trace: TraceDB) -> TraceResponse:
     return TraceResponse(
         id=db_trace.id,
         test_id=db_trace.test_id,
@@ -295,6 +300,31 @@ async def create_trace(
         output_data=json.loads(db_trace.output_data) if db_trace.output_data else None,
         metadata=json.loads(db_trace.metadata),
     )
+
+
+@app.post("/traces", response_model=TraceResponse, status_code=201)
+async def create_trace(
+    trace: TraceCreate,
+    project: ProjectDB = Depends(require_project),
+    db: Session = Depends(get_db),
+):
+    """Create a new trace."""
+    return _trace_response(_persist_trace(trace, project, db))
+
+
+@app.post("/langsmith/import", response_model=TraceResponse, status_code=201)
+async def import_langsmith(
+    body: LangSmithImportRequest,
+    project: ProjectDB = Depends(require_project),
+    db: Session = Depends(get_db),
+):
+    """Read one LangSmith trace and store the handoff review. The LangSmith key is not saved."""
+    try:
+        trace = import_langsmith_trace(body.api_key, body.url)
+    except LangSmithImportError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+    created = TraceCreate.model_validate(trace.model_dump(mode="json"))
+    return _trace_response(_persist_trace(created, project, db))
 
 
 @app.get("/traces", response_model=List[TraceResponse])

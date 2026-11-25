@@ -9,6 +9,38 @@ import { ProjectUnlock } from '@/components/ProjectUnlock';
 import { SiteHeader } from '@/components/SiteHeader';
 import { ArrowLeft, CheckCircle2, XCircle, AlertCircle } from 'lucide-react';
 
+function LangSmithSetup({ trace }: { trace: Trace }) {
+  const setup = trace.metadata?.langsmith;
+  if (!setup || typeof setup !== 'object') return null;
+  const subagents = Array.isArray(setup.subagents) ? setup.subagents : [];
+  const tools = Array.isArray(setup.tools) ? setup.tools : [];
+  return (
+    <div className="bg-slate-800/30 border border-slate-700/30 rounded-lg p-4 mt-4">
+      <h2 className="text-lg font-semibold text-slate-200 mb-1">Setup from the LangSmith trace</h2>
+      <p className="text-xs text-slate-400 mb-3">
+        {typeof setup.note === 'string' ? setup.note : 'Read from the trace you pasted.'}
+      </p>
+      <div className="space-y-2 text-sm text-slate-200">
+        <p><span className="text-slate-400">Main agent. </span>{setup.main_agent || 'Not named on the trace'}</p>
+        <p>
+          <span className="text-slate-400">Subagents called. </span>
+          {subagents.length > 0 ? subagents.join(', ') : 'None on this trace'}
+        </p>
+        <p>
+          <span className="text-slate-400">Tools that ran. </span>
+          {tools.length > 0 ? tools.join(', ') : 'None on this trace'}
+        </p>
+      </div>
+      {typeof setup.instructions === 'string' && setup.instructions && (
+        <div className="mt-3">
+          <div className="text-xs font-medium text-purple-300">Instructions on the run</div>
+          <p className="mt-1 text-xs leading-relaxed text-slate-300 whitespace-pre-wrap">{setup.instructions}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function HandoffTranscript({ trace }: { trace: Trace }) {
   const turns = (trace.events || []).flatMap((event) => {
     if (event.event_type === 'node_exit' && event.data.wrote && typeof event.data.wrote === 'object') {
@@ -472,6 +504,7 @@ export default function TracePage() {
                 )}
               </div>
             </div>
+            <LangSmithSetup trace={trace} />
             <HandoffTranscript trace={trace} />
             <CommunicationReview trace={trace} />
           </div>
